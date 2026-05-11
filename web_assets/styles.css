@@ -1,0 +1,213 @@
+:root {
+  color-scheme: light;
+  --paper: #faf8f2;
+  --ink: #191714;
+  --muted: #6f6659;
+  --line: #d9d1c2;
+  --accent: #0f766e;
+  --accent-soft: #d6f3ed;
+  --active: #ffe08a;
+  --active-strong: #f4b942;
+  --panel: #ffffff;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  line-height: 1.6;
+}
+
+a {
+  color: var(--accent);
+}
+
+.player-shell {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  border-bottom: 1px solid var(--line);
+  background: rgba(250, 248, 242, 0.96);
+  padding: 18px clamp(16px, 4vw, 48px);
+  backdrop-filter: blur(12px);
+}
+
+.episode-kicker {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.episode-heading {
+  display: grid;
+  gap: 8px;
+  margin-top: 5px;
+}
+
+h1 {
+  max-width: 980px;
+  margin: 0;
+  font-size: clamp(1.45rem, 2.4vw, 2.45rem);
+  line-height: 1.15;
+  letter-spacing: 0;
+}
+
+.episode-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.audio-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  margin-top: 14px;
+  max-width: 980px;
+}
+
+audio {
+  width: 100%;
+}
+
+.follow-button {
+  min-height: 36px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: var(--accent);
+  color: white;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 700;
+  padding: 6px 12px;
+  white-space: nowrap;
+}
+
+.follow-button[aria-pressed="false"] {
+  background: var(--panel);
+  color: var(--accent);
+}
+
+.page {
+  width: min(980px, 100%);
+  margin: 0 auto;
+  padding: 28px clamp(16px, 4vw, 32px) 72px;
+}
+
+.transcript-shell {
+  display: grid;
+  gap: 18px;
+}
+
+.turn {
+  display: grid;
+  grid-template-columns: minmax(8rem, 12rem) minmax(0, 1fr);
+  gap: 18px;
+  padding: 18px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.turn.is-current {
+  border-bottom-color: color-mix(in srgb, var(--accent) 45%, var(--line));
+}
+
+.turn-meta {
+  display: grid;
+  align-content: start;
+  gap: 3px;
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+.timestamp {
+  width: fit-content;
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.speaker-code {
+  color: var(--ink);
+  font-weight: 800;
+}
+
+.speaker-name {
+  line-height: 1.35;
+}
+
+.turn p {
+  margin: 0;
+  font-size: 1.07rem;
+}
+
+.phrase {
+  border-radius: 5px;
+  cursor: pointer;
+  margin-inline: -2px;
+  padding: 1px 2px;
+  transition:
+    background-color 160ms ease,
+    box-shadow 160ms ease,
+    color 160ms ease;
+}
+
+.phrase:hover,
+.phrase:focus-visible {
+  background: var(--accent-soft);
+  outline: none;
+}
+
+.phrase.is-active {
+  background: var(--active);
+  box-shadow: 0 0 0 2px var(--active-strong);
+}
+
+@media (max-width: 720px) {
+  .player-shell {
+    padding: 14px 16px;
+  }
+
+  .audio-row {
+    grid-template-columns: 1fr;
+  }
+
+  .follow-button {
+    width: 100%;
+  }
+
+  .page {
+    padding-top: 18px;
+  }
+
+  .turn {
+    grid-template-columns: 1fr;
+    gap: 8px;
+    padding: 16px 0;
+  }
+
+  .turn-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 10px;
+    align-items: baseline;
+  }
+
+  .turn p {
+    font-size: 1rem;
+  }
+}
