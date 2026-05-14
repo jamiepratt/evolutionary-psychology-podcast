@@ -1,9 +1,11 @@
 (ns epp.pipeline-test
   (:require [babashka.fs :as fs]
+            [babashka.process :as process]
             [cheshire.core :as json]
             [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
+            [epp.pipeline.episode-page :as episode-page]
             [epp.pipeline.manifest :as manifest]
             [epp.pipeline.merge :as merge]
             [epp.pipeline.metadata :as metadata]
@@ -15,6 +17,25 @@
 (defn- write-json! [path value]
   (fs/create-dirs (fs/parent path))
   (spit (str path) (str (json/generate-string value {:pretty true}) "\n")))
+
+(defn- generate-node-page! [{:keys [slug title transcript audio out-dir]}]
+  @(process/process ["node"
+                     "scripts/generate_episode_page.mjs"
+                     "--slug" slug
+                     "--title" title
+                     "--transcript" (str transcript)
+                     "--audio" (str audio)
+                     "--outDir" (str out-dir)]
+                    {:out :string
+                     :err :string}))
+
+(defn- normalize-html [value]
+  (-> value
+      (str/replace #"\r\n?" "\n")
+      str/trim))
+
+(defn- strip-script-bodies [value]
+  (str/replace value #"(?s)<script[^>]*>.*?</script>" ""))
 
 (deftest metadata-extraction-preserves-selected-episode-shape
   (let [tmp (fs/create-temp-dir)
@@ -111,6 +132,91 @@
            (read-json combined-path)))
     (is (= (normalize-markdown (slurp "transcripts/final/leda-cosmides-transcript.md"))
            (normalize-markdown (slurp (str final-path)))))))
+
+(deftest episode-page-generation-preserves-node-output-and-static-contracts
+  (let [tmp (fs/create-temp-dir)
+        transcript-path (fs/path tmp "combined.json")
+        audio-path (fs/path tmp "fixture.mp3")
+        node-out (fs/path tmp "node-web")
+        bb-out (fs/path tmp "bb-web")
+        slug "fixture-episode"
+        title "Fixture & Episode"
+        transcript {:metadata {:title "Metadata title"
+                               :link "https://example.test/episode?x=1&y=2"
+                               :pubDate "Thu, 14 May 2026 12:00:00 +0000"}
+                    :speaker_map {:speakers [{:initials "DPz" :name "Dave Pietraszewski"}
+                                             {:initials "LC" :name "Leda Cosmides"}]}
+                    :duration_seconds 65.7
+                    :segments [{:id "intro"
+                                :speaker "DPz"
+                                :start 0
+                                :end 1.5
+                                :text "Hello , Lita Cosmedes & friends."}
+                               {:id "follow"
+                                :speaker "DPz"
+                                :start 2
+                                :end 3
+                                :text "Same turn <with markup>."}
+                               {:speaker "LC"
+                                :start 7.25
+                                :end 9
+                                :text "A new turn."}]}]
+    (write-json! transcript-path transcript)
+    (spit (str audio-path) "fake audio")
+    (generate-node-page! {:slug slug
+                          :title title
+                          :transcript transcript-path
+                          :audio audio-path
+                          :out-dir node-out})
+    (episode-page/generate! {:slug slug
+                             :title title
+                             :transcript transcript-path
+                             :audio audio-path
+                             :out-dir bb-out})
+    (let [node-episode-dir (fs/path node-out "episodes" slug)
+          bb-episode-dir (fs/path bb-out "episodes" slug)
+          node-html (slurp (str (fs/path node-episode-dir "index.html")))
+          bb-html (slurp (str (fs/path bb-episode-dir "index.html")))
+          bb-static-html (strip-script-bodies bb-html)]
+      (testing "semantic transcript JSON matches the Node generator"
+        (is (= (read-json (fs/path node-episode-dir "transcript.json"))
+               (read-json (fs/path bb-episode-dir "transcript.json")))))
+      (testing "generated HTML matches the Node generator modulo line endings"
+        (is (= (normalize-html node-html)
+               (normalize-html bb-html))))
+      (testing "audio and shared assets land in the same public web paths"
+        (is (= "fake audio"
+               (slurp (str (fs/path bb-out "assets" "audio" "fixture-episode.mp3")))))
+        (is (fs/exists? (fs/path bb-out "assets" "player.js")))
+        (is (fs/exists? (fs/path bb-out "assets" "styles.css"))))
+      (testing "player and transcript contracts remain available"
+        (is (str/includes? bb-html "<audio id=\"episode-audio\" controls preload=\"metadata\" src=\"../../assets/audio/fixture-episode.mp3\"></audio>"))
+        (is (str/includes? bb-html "data-follow-toggle aria-pressed=\"true\""))
+        (is (str/includes? bb-html "id=\"phrase-0\" data-phrase-index=\"0\" data-start=\"0\" data-end=\"1.5\" role=\"button\" tabindex=\"0\""))
+        (is (str/includes? bb-html "href=\"#phrase-0\" data-seek=\"0\""))
+        (is (str/includes? bb-html "id=\"phrase-2\" data-phrase-index=\"2\" data-start=\"7.25\" data-end=\"9\" role=\"button\" tabindex=\"0\"")))
+      (testing "the transcript remains readable without JavaScript"
+        (is (str/includes? bb-static-html "Hello, Leda Cosmides &amp; friends."))
+        (is (str/includes? bb-static-html "Same turn &lt;with markup&gt;."))
+        (is (str/includes? bb-static-html "A new turn."))
+        (is (str/includes? bb-static-html "00:07"))))))
+
+(deftest episode-page-cli-preserves-node-option-validation
+  (testing "unexpected positional arguments"
+    (is (thrown-with-msg?
+         clojure.lang.ExceptionInfo
+         #"Unexpected argument: positional"
+         (episode-page/-main "positional"))))
+  (testing "missing option values"
+    (is (thrown-with-msg?
+         clojure.lang.ExceptionInfo
+         #"Missing value for --slug"
+         (episode-page/-main "--slug"))))
+  (testing "unknown options"
+    (is (thrown-with-msg?
+         clojure.lang.ExceptionInfo
+         #"Unknown option --output"
+         (episode-page/-main "--output" "web")))))
 
 (deftest transcript-merge-preserves-fallback-cleanup-offset-and-grouping-behavior
   (let [tmp (fs/create-temp-dir)
