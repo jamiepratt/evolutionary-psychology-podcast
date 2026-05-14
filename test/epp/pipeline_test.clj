@@ -38,6 +38,12 @@
 (defn- strip-script-bodies [value]
   (str/replace value #"(?s)<script[^>]*>.*?</script>" ""))
 
+(defn- line-index [lines pattern]
+  (some (fn [[index line]]
+          (when (str/includes? line pattern)
+            index))
+        (map-indexed vector lines)))
+
 (deftest metadata-extraction-preserves-selected-episode-shape
   (let [tmp (fs/create-temp-dir)
         out (fs/path tmp "episode-selected.json")]
@@ -45,6 +51,39 @@
                         :out-path out})
     (is (= (read-json "sources/episode-selected.json")
            (read-json out)))))
+
+(deftest pages-workflow-builds-static-web-before-deploy
+  (let [workflow (slurp ".github/workflows/pages.yml")
+        lines (str/split-lines workflow)
+        upload-line (line-index lines "actions/upload-pages-artifact")
+        readme (slurp "README.md")
+        package-json (read-json "package.json")
+        expected-commands ["npm ci"
+                           "npm run build:player"
+                           "bb extract-metadata"
+                           "bb build-chunks-manifest"
+                           "bb merge-transcripts"
+                           "bb validate-outputs"
+                           "bb generate-episode-page"]]
+    (is (some? upload-line))
+    (is (str/includes? workflow "DeLaGuardo/setup-clojure"))
+    (is (str/includes? workflow "bb: latest"))
+    (is (str/includes? workflow "actions/setup-node@v4"))
+    (is (str/includes? workflow "cache: npm"))
+    (doseq [command expected-commands]
+      (let [command-line (line-index lines command)]
+        (is (str/includes? workflow command))
+        (is (some? command-line))
+        (when (and command-line upload-line)
+          (is (< command-line upload-line)))))
+    (is (str/includes? workflow "path: web"))
+    (is (not (str/includes? workflow "path: .")))
+    (is (str/includes? readme "npm ci"))
+    (is (str/includes? readme "npm run build:player"))
+    (doseq [command (drop 2 expected-commands)]
+      (is (str/includes? readme command)))
+    (is (= "shadow-cljs release player"
+           (get-in package-json [:scripts :build:player])))))
 
 (deftest chunk-manifest-preserves-ffprobe-offset-and-size-behavior
   (let [tmp (fs/create-temp-dir)
