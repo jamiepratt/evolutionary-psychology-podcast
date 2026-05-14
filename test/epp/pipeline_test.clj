@@ -2,8 +2,10 @@
   (:require [babashka.fs :as fs]
             [cheshire.core :as json]
             [clojure.java.io :as io]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [epp.pipeline.manifest :as manifest]
+            [epp.pipeline.merge :as merge]
             [epp.pipeline.metadata :as metadata]
             [epp.pipeline.validation :as validation]))
 
@@ -93,3 +95,135 @@
           (is (= (dissoc report :checked_at)
                  (dissoc written :checked_at)))
           (is (string? (:checked_at written))))))))
+
+(defn- normalize-markdown [value]
+  (-> value
+      (str/replace #"\r\n?" "\n")
+      str/trim))
+
+(deftest transcript-merge-preserves-existing-node-outputs
+  (let [tmp (fs/create-temp-dir)
+        combined-path (fs/path tmp "leda-cosmides-diarized-combined.json")
+        final-path (fs/path tmp "leda-cosmides-transcript.md")]
+    (merge/merge! {:combined-path combined-path
+                   :final-path final-path})
+    (is (= (read-json "transcripts/combined/leda-cosmides-diarized-combined.json")
+           (read-json combined-path)))
+    (is (= (normalize-markdown (slurp "transcripts/final/leda-cosmides-transcript.md"))
+           (normalize-markdown (slurp (str final-path)))))))
+
+(deftest transcript-merge-preserves-fallback-cleanup-offset-and-grouping-behavior
+  (let [tmp (fs/create-temp-dir)
+        raw-dir (fs/path tmp "raw_chunks")
+        manifest-path (fs/path tmp "chunks-manifest.json")
+        metadata-path (fs/path tmp "episode-selected.json")
+        speaker-map-path (fs/path tmp "speaker-map.json")
+        combined-path (fs/path tmp "combined.json")
+        final-path (fs/path tmp "final.md")]
+    (write-json! manifest-path
+                 {:total_duration_seconds 70.9
+                  :chunks [{:index 1
+                            :start_offset_seconds 60
+                            :duration_seconds 10}
+                           {:index 0
+                            :start_offset_seconds 0
+                            :duration_seconds 60}]})
+    (write-json! metadata-path
+                 {:title "Fixture Episode"
+                  :link "https://example.test/episode"
+                  :pubDate "Thu, 14 May 2026 12:00:00 +0000"})
+    (write-json! speaker-map-path
+                 {:speakers [{:initials "LC"
+                              :name "Leda Cosmides"}
+                             {:initials "DPz"
+                              :name "Dave Pietraszewski"}
+                             {:initials "DPi"
+                              :name "David Pinsof"}]})
+    (write-json! (fs/path raw-dir "chunk_000.json")
+                 {:duration 60
+                  :text "zero"
+                  :segments [{:id "late"
+                              :start 8.4567
+                              :end 9.4567
+                              :speaker "LC"
+                              :text "Lita Cosmedes met Robert Rivers."}
+                             {:id "empty"
+                              :start 12
+                              :end 13
+                              :speaker "mystery"
+                              :text "   "}]
+                  :usage {:total_tokens 1}})
+    (write-json! (fs/path raw-dir "chunk_001.json")
+                 {:duration 10
+                  :text "one"
+                  :segments [{:id "named"
+                              :start 0.1
+                              :end 1.5
+                              :speaker "David Pinsof"
+                              :text "David Pinsoff says hello ,"}
+                             {:id "fallback"
+                              :start 2
+                              :end 3
+                              :speaker "B"
+                              :text "and Lita replies."}
+                             {:id "gap"
+                              :start 7
+                              :end 8
+                              :text "unknown speaker"}]})
+    (merge/merge! {:manifest-path manifest-path
+                   :metadata-path metadata-path
+                   :speaker-map-path speaker-map-path
+                   :raw-dir raw-dir
+                   :combined-path combined-path
+                   :final-path final-path})
+    (let [combined (read-json combined-path)
+          markdown (slurp (str final-path))]
+      (is (= 70.9 (:duration_seconds combined)))
+      (is (= [{:index 1
+               :raw_path (str (fs/path raw-dir "chunk_001.json"))
+               :duration_seconds 10
+               :text_length 3
+               :segment_count 3
+               :usage nil}
+              {:index 0
+               :raw_path (str (fs/path raw-dir "chunk_000.json"))
+               :duration_seconds 60
+               :text_length 4
+               :segment_count 2
+               :usage {:total_tokens 1}}]
+             (:raw_chunks combined)))
+      (is (= [{:id "chunk_000_late"
+               :speaker "LC"
+               :source_speaker "LC"
+               :start 8.457
+               :end 9.457}
+              {:id "chunk_000_empty"
+               :speaker "UNK"
+               :source_speaker "mystery"
+               :start 12
+               :end 13}
+              {:id "chunk_001_named"
+               :speaker "DPi"
+               :source_speaker "David Pinsof"
+               :start 60.1
+               :end 61.5}
+              {:id "chunk_001_fallback"
+               :speaker "DPi"
+               :source_speaker "B"
+               :start 62
+               :end 63}
+              {:id "chunk_001_gap"
+               :speaker "UNK"
+               :source_speaker nil
+               :start 67
+               :end 68}]
+             (mapv #(select-keys % [:id :speaker :source_speaker :start :end])
+                   (:segments combined))))
+      (is (str/includes? markdown
+                         "Duration: 00:01:10"))
+      (is (str/includes? markdown
+                         "**[00:00:08] LC:** Leda Cosmides met Robert Trivers."))
+      (is (str/includes? markdown
+                         "**[00:01:00] DPi:** David Pinsof says hello, and Leda replies."))
+      (is (str/includes? markdown
+                         "**[00:01:07] UNK:** unknown speaker")))))
