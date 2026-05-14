@@ -1,6 +1,7 @@
 {:paths ["src" "test"]
  :tasks
  {:requires ([epp.pipeline.metadata :as metadata]
+             [epp.pipeline.episode-page :as episode-page]
              [epp.pipeline.manifest :as manifest]
              [epp.pipeline.merge :as merge]
              [epp.pipeline.validation :as validation])
@@ -10,6 +11,8 @@
                          :task (manifest/build!)}
   merge-transcripts {:doc "Write combined diarized JSON and final markdown transcript."
                      :task (merge/merge!)}
+  generate-episode-page {:doc "Write the static episode page and public transcript assets."
+                         :task (apply episode-page/-main *command-line-args*)}
   validate-outputs {:doc "Write transcripts/combined/validation-report.json and fail on validation errors."
                     :task (validation/validate!)}
   test {:doc "Run Babashka pipeline tests."
