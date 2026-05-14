@@ -1,5 +1,7 @@
 {:source-paths ["src-cljs"]
  :dependencies [[reagent "1.2.0"]]
+ :nrepl {:port 7888}
+ :dev-http {8000 "web"}
  :builds
  {:player
   {:target :browser

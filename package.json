@@ -3,6 +3,7 @@
   "private": true,
   "scripts": {
     "build:player": "shadow-cljs release player",
+    "dev": "shadow-cljs watch player",
     "test:player": "node --test test/player_*.test.mjs"
   },
   "dependencies": {

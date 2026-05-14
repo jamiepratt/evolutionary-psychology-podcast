@@ -40,13 +40,29 @@ bb build-chunks-manifest
 
 ## Local preview
 
-After running the build commands, serve the generated `web/` directory:
+Start a local development server with live ClojureScript rebuilds:
 
 ```sh
-python3 -m http.server 8000 --directory web
+npm run dev
 ```
 
 Then open `http://localhost:8000`.
+
+Shadow watch mode writes development assets under `web/assets/`; run
+`npm run build:player` before committing if you want to restore the production
+player bundle.
+
+## ClojureScript REPL
+
+`npm run dev` also starts a Shadow nREPL on port `7888`. After opening the
+local site in a browser, connect to that port and select the `:player` build:
+
+```sh
+clj-nrepl-eval -p 7888 "(require '[shadow.cljs.devtools.api :as shadow]) (shadow/nrepl-select :player)"
+```
+
+Editor REPL clients such as CIDER can connect to `localhost:7888` and choose the
+Shadow `:player` build.
 
 ## Notes
 

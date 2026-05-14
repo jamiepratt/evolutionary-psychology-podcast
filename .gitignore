@@ -4,6 +4,7 @@ node_modules/
 .shadow-cljs/
 web/**/*.map
 web/assets/manifest.edn
+web/assets/cljs-runtime/
 
 # Source and intermediate audio are large local build inputs. Keep the small
 # metadata files needed by CI while ignoring the source audio itself.
