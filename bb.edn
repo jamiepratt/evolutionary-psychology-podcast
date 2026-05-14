@@ -2,11 +2,14 @@
  :tasks
  {:requires ([epp.pipeline.metadata :as metadata]
              [epp.pipeline.manifest :as manifest]
+             [epp.pipeline.merge :as merge]
              [epp.pipeline.validation :as validation])
   extract-metadata {:doc "Write sources/episode-selected.json from sources/episode-selected.xml."
                     :task (metadata/extract!)}
   build-chunks-manifest {:doc "Write audio/chunks-manifest.json from audio/chunks/*.mp3."
                          :task (manifest/build!)}
+  merge-transcripts {:doc "Write combined diarized JSON and final markdown transcript."
+                     :task (merge/merge!)}
   validate-outputs {:doc "Write transcripts/combined/validation-report.json and fail on validation errors."
                     :task (validation/validate!)}
   test {:doc "Run Babashka pipeline tests."
