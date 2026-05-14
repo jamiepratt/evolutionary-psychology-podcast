@@ -20,8 +20,13 @@
 
 (def cleanup-replacements
   [[#"\bDavid Pinsoff\b" "David Pinsof"]
+   [#"\bDavid Petruzewski\b" "Dave Pietraszewski"]
    [#"\bDavid Piotr Zewski\b" "Dave Pietraszewski"]
    [#"\bDavid Pietra Zewski\b" "Dave Pietraszewski"]
+   [#"\bDavid Pietrzewski\b" "Dave Pietraszewski"]
+   [#"\bHugo Messier\b" "Hugo Mercier"]
+   [#"\bInstitut Jean Nicot\b" "Institut Jean Nicod"]
+   [#"\bInstitut Jean Nucleux\b" "Institut Jean Nicod"]
    [#"\bLita Kosmedes\b" "Leda Cosmides"]
    [#"\bLita Cosmedes\b" "Leda Cosmides"]
    [#"\bLita Cosmides\b" "Leda Cosmides"]

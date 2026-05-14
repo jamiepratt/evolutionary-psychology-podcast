@@ -1,0 +1,13 @@
+{
+  "checked_at": "2026-05-14T18:19:55.590555Z",
+  "chunk_count": 5,
+  "duration_seconds": 5874.611,
+  "max_chunk_bytes": 4800438,
+  "segment_count": 1343,
+  "speaker_labels": [
+    "DPi",
+    "DPz",
+    "HM"
+  ],
+  "failures": []
+}

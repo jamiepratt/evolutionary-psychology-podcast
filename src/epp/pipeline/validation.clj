@@ -4,12 +4,19 @@
 (def default-manifest-path "audio/chunks-manifest.json")
 (def default-combined-path "transcripts/combined/leda-cosmides-diarized-combined.json")
 (def default-out-path "transcripts/combined/validation-report.json")
-(def allowed-speakers #{"DPz" "DPi" "LC" "UNK"})
+(def default-allowed-speakers #{"DPz" "DPi" "LC" "UNK"})
 (def max-upload-bytes (* 25 1024 1024))
 
-(defn- duration-failures [manifest]
-  (when (> (Math/abs (- (:total_duration_seconds manifest) 7431)) 90)
-    [(str "Duration " (:total_duration_seconds manifest) "s is not close to 7431s.")]))
+(defn- expected-duration [manifest combined]
+  (or (:expected_duration_seconds manifest)
+      (get-in combined [:metadata :duration_seconds])
+      7431))
+
+(defn- duration-failures [manifest combined]
+  (let [expected (expected-duration manifest combined)]
+    (when (> (Math/abs (- (:total_duration_seconds manifest) expected)) 90)
+      [(str "Duration " (:total_duration_seconds manifest)
+            "s is not close to " expected "s.")])))
 
 (defn- chunk-size-failures [manifest]
   (for [chunk (:chunks manifest)
@@ -25,18 +32,26 @@
          :when (< (:start current) (:start previous))]
      (str "Non-monotonic timestamp at segment " index "."))))
 
+(defn- allowed-speakers [combined]
+  (-> (into default-allowed-speakers
+            (keep :initials)
+            (get-in combined [:speaker_map :speakers]))
+      (into (vals (:fallback_speaker_label_overrides combined)))
+      (conj "UNK")))
+
 (defn- speaker-failures [combined]
-  (first
-   (for [segment (:segments combined)
-         :when (not (contains? allowed-speakers (:speaker segment)))]
-     (str "Unexpected speaker label " (:speaker segment) "."))))
+  (let [allowed (allowed-speakers combined)]
+    (first
+     (for [segment (:segments combined)
+           :when (not (contains? allowed (:speaker segment)))]
+       (str "Unexpected speaker label " (:speaker segment) ".")))))
 
 (defn- max-chunk-bytes [chunks]
   (when (seq chunks)
     (apply max (map :byte_size chunks))))
 
 (defn validation-report [manifest combined]
-  (let [failures (vec (concat (duration-failures manifest)
+  (let [failures (vec (concat (duration-failures manifest combined)
                               (chunk-size-failures manifest)
                               (some-> (monotonic-failures combined) vector)
                               (some-> (speaker-failures combined) vector)))]

@@ -10,13 +10,18 @@
 (def default-raw-dir "transcripts/raw_chunks")
 (def default-combined-path "transcripts/combined/leda-cosmides-diarized-combined.json")
 (def default-final-path "transcripts/final/leda-cosmides-transcript.md")
-(def allowed-speaker-labels #{"DPz" "DPi" "LC"})
-(def fallback-speaker-label-overrides (array-map :A "DPi" :B "DPi"))
+(def default-allowed-speaker-labels #{"DPz" "DPi" "LC"})
+(def default-fallback-speaker-label-overrides (array-map :A "DPi" :B "DPi"))
 
 (def cleanup-replacements
   [[#"\bDavid Pinsoff\b" "David Pinsof"]
+   [#"\bDavid Petruzewski\b" "Dave Pietraszewski"]
    [#"\bDavid Piotr Zewski\b" "Dave Pietraszewski"]
    [#"\bDavid Pietra Zewski\b" "Dave Pietraszewski"]
+   [#"\bDavid Pietrzewski\b" "Dave Pietraszewski"]
+   [#"\bHugo Messier\b" "Hugo Mercier"]
+   [#"\bInstitut Jean Nicot\b" "Institut Jean Nicod"]
+   [#"\bInstitut Jean Nucleux\b" "Institut Jean Nicod"]
    [#"\bLita Kosmedes\b" "Leda Cosmides"]
    [#"\bLita Cosmedes\b" "Leda Cosmides"]
    [#"\bLita Cosmides\b" "Leda Cosmides"]
@@ -85,13 +90,45 @@
           {}
           (:speakers speaker-map)))
 
-(defn- speaker-label [label-map label]
+(defn- fallback-speaker-label-overrides [speaker-map]
+  (merge default-fallback-speaker-label-overrides
+         (:fallback_speaker_label_overrides speaker-map)))
+
+(defn- allowed-speaker-labels [speaker-map fallback-overrides]
+  (-> (into default-allowed-speaker-labels
+            (keep :initials)
+            (:speakers speaker-map))
+      (into (vals fallback-overrides))
+      (conj "UNK")))
+
+(defn- fallback-speaker-label [fallback-overrides label]
+  (or (get fallback-overrides label)
+      (get fallback-overrides (keyword label))))
+
+(defn- correction-matches? [correction {:keys [speaker source-speaker start end]}]
+  (and (or (nil? (:from_speaker correction))
+           (= (:from_speaker correction) speaker))
+       (or (nil? (:source_speaker correction))
+           (= (:source_speaker correction) source-speaker))
+       (or (nil? (:start_seconds correction))
+           (<= (:start_seconds correction) start))
+       (or (nil? (:end_seconds correction))
+           (<= end (:end_seconds correction)))))
+
+(defn- corrected-speaker [corrections segment speaker]
+  (or (some (fn [correction]
+              (when (correction-matches? correction (assoc segment :speaker speaker))
+                (:speaker correction)))
+            corrections)
+      speaker))
+
+(defn- speaker-label [label-map fallback-overrides allowed-labels label]
   (cond
     (or (nil? label) (= "" label)) "UNK"
-    (contains? fallback-speaker-label-overrides (keyword label))
-    (get fallback-speaker-label-overrides (keyword label))
+    (fallback-speaker-label fallback-overrides label)
+    (fallback-speaker-label fallback-overrides label)
     (contains? label-map label) (get label-map label)
-    (contains? allowed-speaker-labels label) label
+    (contains? allowed-labels label) label
     :else "UNK"))
 
 (defn- chunk-id [chunk-index]
@@ -110,32 +147,43 @@
           :segment_count (count (:segments raw))
           :usage (:usage raw nil))))
 
-(defn- segment-records [chunk raw label-map]
+(defn- segment-records [chunk raw label-map fallback-overrides allowed-labels corrections]
   (let [chunk-index (:index chunk)
         chunk-id (chunk-id chunk-index)
         offset (:start_offset_seconds chunk)]
     (mapv (fn [segment]
-            (let [source-speaker (:speaker segment nil)]
+            (let [source-speaker (:speaker segment nil)
+                  start (display-number (+ offset (double (or (:start segment) 0))))
+                  end (display-number (+ offset (double (or (:end segment) 0))))
+                  speaker (speaker-label label-map fallback-overrides allowed-labels source-speaker)]
               (array-map
                :type (or (:type segment) "transcript.text.segment")
                :id (str chunk-id "_" (:id segment))
                :chunk_index chunk-index
-               :start (display-number (+ offset (double (or (:start segment) 0))))
-               :end (display-number (+ offset (double (or (:end segment) 0))))
-               :speaker (speaker-label label-map source-speaker)
+               :start start
+               :end end
+               :speaker (corrected-speaker corrections
+                                           {:source-speaker source-speaker
+                                            :start start
+                                            :end end}
+                                           speaker)
                :source_speaker source-speaker
                :text (or (:text segment) ""))))
           (:segments raw))))
 
-(defn- chunk-and-segments [raw-dir label-map chunk]
+(defn- chunk-and-segments [raw-dir label-map fallback-overrides allowed-labels corrections chunk]
   (let [raw-path (raw-path raw-dir (:index chunk))
         raw (pipeline-json/read-json raw-path)]
     {:summary (chunk-summary chunk raw raw-path)
-     :segments (segment-records chunk raw label-map)}))
+     :segments (segment-records chunk raw label-map fallback-overrides allowed-labels corrections)}))
 
 (defn- combined-transcript [manifest metadata speaker-map raw-dir]
   (let [label-map (label-to-initials speaker-map)
-        processed (mapv #(chunk-and-segments raw-dir label-map %) (:chunks manifest))
+        fallback-overrides (fallback-speaker-label-overrides speaker-map)
+        allowed-labels (allowed-speaker-labels speaker-map fallback-overrides)
+        corrections (:speaker_label_corrections speaker-map)
+        processed (mapv #(chunk-and-segments raw-dir label-map fallback-overrides allowed-labels corrections %)
+                        (:chunks manifest))
         segments (->> processed
                       (mapcat :segments)
                       (sort-by (juxt :start :end))
@@ -144,7 +192,7 @@
      :task "transcribe"
      :metadata metadata
      :speaker_map speaker-map
-     :fallback_speaker_label_overrides fallback-speaker-label-overrides
+     :fallback_speaker_label_overrides fallback-overrides
      :manifest default-manifest-path
      :raw_chunks (mapv :summary processed)
      :duration_seconds (:total_duration_seconds manifest)
@@ -177,22 +225,26 @@
 (defn- turns [segments]
   (reduce add-turn [] segments))
 
-(defn- final-markdown [metadata manifest segments]
-  (let [lines (into [(str "# " (:title metadata))
-                     ""
-                     (str "Source: " (:link metadata))
-                     (str "Published: " (:pubDate metadata))
-                     (str "Duration: " (format-time (:total_duration_seconds manifest)))
-                     ""
-                     "## Speakers"
-                     ""
-                     "- DPz: Dave Pietraszewski"
-                     "- DPi: David Pinsof"
-                     "- LC: Leda Cosmides"
-                     "- UNK: uncertain speaker"
-                     ""
-                     "## Transcript"
-                     ""]
+(defn- speaker-lines [speaker-map]
+  (concat (map (fn [speaker]
+                 (str "- " (:initials speaker) ": " (:name speaker)))
+               (:speakers speaker-map))
+          ["- UNK: uncertain speaker"]))
+
+(defn- final-markdown [metadata manifest speaker-map segments]
+  (let [header (vec (concat [(str "# " (:title metadata))
+                             ""
+                             (str "Source: " (:link metadata))
+                             (str "Published: " (:pubDate metadata))
+                             (str "Duration: " (format-time (:total_duration_seconds manifest)))
+                             ""
+                             "## Speakers"
+                             ""]
+                            (speaker-lines speaker-map)
+                            [""
+                             "## Transcript"
+                             ""]))
+        lines (into header
                     (mapcat (fn [turn]
                               [(str "**[" (format-time (:start turn)) "] "
                                     (:speaker turn)
@@ -215,7 +267,7 @@
          metadata (js-json-value (pipeline-json/read-json metadata-path))
          speaker-map (js-json-value (pipeline-json/read-json speaker-map-path))
          combined (combined-transcript manifest metadata speaker-map raw-dir)
-         markdown (final-markdown metadata manifest (:segments combined))]
+         markdown (final-markdown metadata manifest speaker-map (:segments combined))]
      (pipeline-json/write-json! combined-path combined)
      (when-let [parent (fs/parent final-path)]
        (fs/create-dirs parent))
