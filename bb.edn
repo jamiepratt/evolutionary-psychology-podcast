@@ -1,0 +1,13 @@
+{:paths ["src" "test"]
+ :tasks
+ {:requires ([epp.pipeline.metadata :as metadata]
+             [epp.pipeline.manifest :as manifest]
+             [epp.pipeline.validation :as validation])
+  extract-metadata {:doc "Write sources/episode-selected.json from sources/episode-selected.xml."
+                    :task (metadata/extract!)}
+  build-chunks-manifest {:doc "Write audio/chunks-manifest.json from audio/chunks/*.mp3."
+                         :task (manifest/build!)}
+  validate-outputs {:doc "Write transcripts/combined/validation-report.json and fail on validation errors."
+                    :task (validation/validate!)}
+  test {:doc "Run Babashka pipeline tests."
+        :task ((requiring-resolve 'epp.pipeline-test-runner/-main))}}}
