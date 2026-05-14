@@ -45,7 +45,6 @@ jobs:
       - name: Generate static site
         run: |
           bb extract-metadata
-          bb build-chunks-manifest
           bb merge-transcripts
           bb validate-outputs
           bb generate-episode-page

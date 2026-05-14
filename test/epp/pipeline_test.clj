@@ -46,10 +46,9 @@
         upload-line (line-index lines "actions/upload-pages-artifact")
         readme (slurp "README.md")
         package-json (read-json "package.json")
-        expected-commands ["npm ci"
+        workflow-commands ["npm ci"
                            "npm run build:player"
                            "bb extract-metadata"
-                           "bb build-chunks-manifest"
                            "bb merge-transcripts"
                            "bb validate-outputs"
                            "bb generate-episode-page"]]
@@ -58,17 +57,22 @@
     (is (str/includes? workflow "bb: latest"))
     (is (str/includes? workflow "actions/setup-node@v4"))
     (is (str/includes? workflow "cache: npm"))
-    (doseq [command expected-commands]
+    (doseq [command workflow-commands]
       (let [command-line (line-index lines command)]
         (is (str/includes? workflow command))
         (is (some? command-line))
         (when (and command-line upload-line)
           (is (< command-line upload-line)))))
+    (is (not (str/includes? workflow "bb build-chunks-manifest")))
     (is (str/includes? workflow "path: web"))
     (is (not (str/includes? workflow "path: .")))
     (is (str/includes? readme "npm ci"))
     (is (str/includes? readme "npm run build:player"))
-    (doseq [command (drop 2 expected-commands)]
+    (doseq [command ["bb extract-metadata"
+                     "bb build-chunks-manifest"
+                     "bb merge-transcripts"
+                     "bb validate-outputs"
+                     "bb generate-episode-page"]]
       (is (str/includes? readme command)))
     (is (= "shadow-cljs release player"
            (get-in package-json [:scripts :build:player])))))
@@ -436,6 +440,36 @@
         (is (str/includes? bb-static-html "Same turn &lt;with markup&gt;."))
         (is (str/includes? bb-static-html "A new turn."))
         (is (str/includes? bb-static-html "00:07"))))))
+
+(deftest episode-page-generation-can-use-committed-public-audio
+  (let [tmp (fs/create-temp-dir)
+        transcript-path (fs/path tmp "combined.json")
+        out-dir (fs/path tmp "web")
+        slug "leda-cosmides"
+        audio-path (fs/path out-dir "assets" "audio" "leda-cosmides.mp3")
+        transcript {:metadata {:title "Fixture"
+                               :link "https://example.test/episode"
+                               :pubDate "Thu, 14 May 2026 12:00:00 +0000"}
+                    :speaker_map {:speakers []}
+                    :duration_seconds 1
+                    :segments [{:id "intro"
+                                :speaker "DPi"
+                                :start 0
+                                :end 1
+                                :text "Hello."}]}]
+    (write-json! transcript-path transcript)
+    (fs/create-dirs (fs/parent audio-path))
+    (fs/create-dirs (fs/path out-dir "assets"))
+    (spit (str audio-path) "committed audio")
+    (spit (str (fs/path out-dir "assets" "player.js")) "compiled player")
+    (episode-page/generate! {:slug slug
+                             :transcript transcript-path
+                             :audio audio-path
+                             :out-dir out-dir})
+    (is (= "committed audio" (slurp (str audio-path))))
+    (is (str/includes?
+         (slurp (str (fs/path out-dir "episodes" slug "index.html")))
+         "src=\"../../assets/audio/leda-cosmides.mp3\""))))
 
 (deftest episode-page-cli-preserves-option-validation
   (testing "unexpected positional arguments"

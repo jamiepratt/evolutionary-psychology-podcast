@@ -1,0 +1,34 @@
+{
+  "source": "transcripts/raw_chunks/pilot_000.json",
+  "model": "gpt-4o-transcribe-diarize",
+  "notes": [
+    "Pilot labels: A=David Pinsof from self-introduction at 0.0s; B=Dave Pietraszewski from self-introduction at 1.3s; D=Leda Cosmides from the first long answer beginning around 257s.",
+    "Reference clips are clean 2-10 second excerpts from the normalized episode audio."
+  ],
+  "speakers": [
+    {
+      "initials": "DPz",
+      "name": "Dave Pietraszewski",
+      "pilot_label": "B",
+      "reference_clip": "audio/speaker_refs/DPz-dave-pietraszewski.mp3",
+      "reference_start_seconds": 150.64,
+      "reference_duration_seconds": 7.9
+    },
+    {
+      "initials": "DPi",
+      "name": "David Pinsof",
+      "pilot_label": "A",
+      "reference_clip": "audio/speaker_refs/DPi-david-pinsof.mp3",
+      "reference_start_seconds": 5.75,
+      "reference_duration_seconds": 4.1
+    },
+    {
+      "initials": "LC",
+      "name": "Leda Cosmides",
+      "pilot_label": "D",
+      "reference_clip": "audio/speaker_refs/LC-leda-cosmides.mp3",
+      "reference_start_seconds": 288.53,
+      "reference_duration_seconds": 8.0
+    }
+  ]
+}

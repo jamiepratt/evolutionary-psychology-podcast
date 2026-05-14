@@ -5,8 +5,8 @@ Static, timestamped episode transcripts for the Evolutionary Psychology Podcast.
 ## Published site
 
 The GitHub Pages workflow builds the transcript player, regenerates the static
-site with Babashka, and deploys only the contents of `web/` on every push to
-`main`.
+site from committed transcript artifacts with Babashka, and deploys only the
+contents of `web/` on every push to `main`.
 
 ## Build commands
 
@@ -22,14 +22,20 @@ Build the ClojureScript transcript player:
 npm run build:player
 ```
 
-Regenerate the local static site outputs:
+Regenerate the local static site outputs from committed transcript artifacts:
 
 ```sh
 bb extract-metadata
-bb build-chunks-manifest
 bb merge-transcripts
 bb validate-outputs
 bb generate-episode-page
+```
+
+If you have the ignored local source audio under `audio/chunks/`, regenerate
+`audio/chunks-manifest.json` first:
+
+```sh
+bb build-chunks-manifest
 ```
 
 ## Local preview

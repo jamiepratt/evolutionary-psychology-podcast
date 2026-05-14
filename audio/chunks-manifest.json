@@ -1,0 +1,58 @@
+{
+  "source_audio": "audio/processed/leda-cosmides-normalized.mp3",
+  "chunk_seconds_target": 1200,
+  "max_upload_bytes": 26214400,
+  "chunk_count": 7,
+  "total_duration_seconds": 7431.118,
+  "chunks": [
+    {
+      "index": 0,
+      "path": "audio/chunks/leda-cosmides-chunk-000.mp3",
+      "start_offset_seconds": 0,
+      "duration_seconds": 1199.988,
+      "byte_size": 7200522
+    },
+    {
+      "index": 1,
+      "path": "audio/chunks/leda-cosmides-chunk-001.mp3",
+      "start_offset_seconds": 1199.988,
+      "duration_seconds": 1199.988,
+      "byte_size": 7200306
+    },
+    {
+      "index": 2,
+      "path": "audio/chunks/leda-cosmides-chunk-002.mp3",
+      "start_offset_seconds": 2399.976,
+      "duration_seconds": 1199.988,
+      "byte_size": 7200306
+    },
+    {
+      "index": 3,
+      "path": "audio/chunks/leda-cosmides-chunk-003.mp3",
+      "start_offset_seconds": 3599.964,
+      "duration_seconds": 1200.024,
+      "byte_size": 7200522
+    },
+    {
+      "index": 4,
+      "path": "audio/chunks/leda-cosmides-chunk-004.mp3",
+      "start_offset_seconds": 4799.988,
+      "duration_seconds": 1199.988,
+      "byte_size": 7200306
+    },
+    {
+      "index": 5,
+      "path": "audio/chunks/leda-cosmides-chunk-005.mp3",
+      "start_offset_seconds": 5999.976,
+      "duration_seconds": 1199.988,
+      "byte_size": 7200306
+    },
+    {
+      "index": 6,
+      "path": "audio/chunks/leda-cosmides-chunk-006.mp3",
+      "start_offset_seconds": 7199.964,
+      "duration_seconds": 231.154,
+      "byte_size": 1389042
+    }
+  ]
+}

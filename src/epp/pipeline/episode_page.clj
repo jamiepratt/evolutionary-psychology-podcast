@@ -8,7 +8,7 @@
   {:slug "leda-cosmides"
    :title "Founding Evolutionary Psychology with Leda Cosmides"
    :transcript "transcripts/combined/leda-cosmides-diarized-combined.json"
-   :audio "audio/processed/leda-cosmides-normalized.mp3"
+   :audio "web/assets/audio/leda-cosmides.mp3"
    :out-dir "web"})
 
 (def speaker-fallbacks
@@ -268,6 +268,17 @@
 (defn- extension [path]
   (or (second (re-find #"(\.[^./\\]+)$" (str path))) ".mp3"))
 
+(defn- same-path? [left right]
+  (= (str (fs/absolutize left))
+     (str (fs/absolutize right))))
+
+(defn- copy-audio! [source target]
+  (if (same-path? source target)
+    (when-not (fs/exists? source)
+      (throw (ex-info "Episode audio asset is missing."
+                      {:path (str source)})))
+    (fs/copy source target {:replace-existing true})))
+
 (defn- public-transcript [{:keys [config transcript names segments turns]}]
   (array-map
    :slug (:slug config)
@@ -315,7 +326,7 @@
      (fs/create-dirs episode-dir)
      (fs/create-dirs audio-dir)
      (copy-shared-assets! out-dir)
-     (fs/copy (:audio config) audio-target {:replace-existing true})
+     (copy-audio! (:audio config) audio-target)
      (pipeline-json/write-json! (fs/path episode-dir "transcript.json") public-transcript)
      (spit (str (fs/path episode-dir "index.html")) html)
      (println (str "Generated " (fs/path episode-dir "index.html")))

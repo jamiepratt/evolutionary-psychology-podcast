@@ -5,8 +5,12 @@ node_modules/
 web/**/*.map
 web/assets/manifest.edn
 
-# Source and intermediate audio are large local build inputs. The deployable
-# episode audio lives under web/assets/audio.
-audio/
+# Source and intermediate audio are large local build inputs. Keep the small
+# metadata files needed by CI while ignoring the source audio itself.
+audio/*
+!audio/chunks-manifest.json
+!audio/speaker_refs/
+audio/speaker_refs/*
+!audio/speaker_refs/speaker-map.json
 !web/assets/audio/
 local-notes/
