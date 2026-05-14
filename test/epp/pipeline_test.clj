@@ -296,6 +296,8 @@
                                 :text "A new turn."}]}]
     (write-json! transcript-path transcript)
     (spit (str audio-path) "fake audio")
+    (fs/create-dirs (fs/path bb-out "assets"))
+    (spit (str (fs/path bb-out "assets" "player.js")) "compiled player")
     (generate-node-page! {:slug slug
                           :title title
                           :transcript transcript-path
@@ -320,7 +322,8 @@
       (testing "audio and shared assets land in the same public web paths"
         (is (= "fake audio"
                (slurp (str (fs/path bb-out "assets" "audio" "fixture-episode.mp3")))))
-        (is (fs/exists? (fs/path bb-out "assets" "player.js")))
+        (is (= "compiled player"
+               (slurp (str (fs/path bb-out "assets" "player.js")))))
         (is (fs/exists? (fs/path bb-out "assets" "styles.css"))))
       (testing "player and transcript contracts remain available"
         (is (str/includes? bb-html "<audio id=\"episode-audio\" controls preload=\"metadata\" src=\"../../assets/audio/fixture-episode.mp3\"></audio>"))

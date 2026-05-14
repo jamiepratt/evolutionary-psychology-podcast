@@ -1,0 +1,16 @@
+{
+  "name": "evolutionary-psychology-podcast",
+  "private": true,
+  "scripts": {
+    "build:player": "shadow-cljs release player",
+    "test:player": "node --test test/player_*.test.mjs"
+  },
+  "dependencies": {
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "shadow-cljs": "2.28.20"
+  },
+  "devDependencies": {
+    "jsdom": "24.1.3"
+  }
+}
