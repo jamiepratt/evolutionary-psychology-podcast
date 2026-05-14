@@ -25,15 +25,39 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Configure Pages
-        uses: actions/configure-pages@v5
+      - name: Setup Babashka
+        uses: DeLaGuardo/setup-clojure@13.4
+        with:
+          bb: latest
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Build transcript player
+        run: npm run build:player
+
+      - name: Generate static site
+        run: |
+          bb extract-metadata
+          bb build-chunks-manifest
+          bb merge-transcripts
+          bb validate-outputs
+          bb generate-episode-page
 
       - name: Upload site
         uses: actions/upload-pages-artifact@v3
         with:
           path: web
 
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
       - name: Deploy
         id: deployment
         uses: actions/deploy-pages@v4
-
