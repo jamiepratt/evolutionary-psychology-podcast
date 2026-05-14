@@ -1,6 +1,5 @@
 (ns epp.pipeline-test
   (:require [babashka.fs :as fs]
-            [babashka.process :as process]
             [cheshire.core :as json]
             [clojure.java.io :as io]
             [clojure.string :as str]
@@ -18,17 +17,6 @@
 (defn- write-json! [path value]
   (fs/create-dirs (fs/parent path))
   (spit (str path) (str (json/generate-string value {:pretty true}) "\n")))
-
-(defn- generate-node-page! [{:keys [slug title transcript audio out-dir]}]
-  @(process/process ["node"
-                     "scripts/generate_episode_page.mjs"
-                     "--slug" slug
-                     "--title" title
-                     "--transcript" (str transcript)
-                     "--audio" (str audio)
-                     "--outDir" (str out-dir)]
-                    {:out :string
-                     :err :string}))
 
 (defn- normalize-html [value]
   (-> value
@@ -162,7 +150,7 @@
       (str/replace #"\r\n?" "\n")
       str/trim))
 
-(deftest transcript-merge-preserves-existing-node-outputs
+(deftest transcript-merge-preserves-existing-outputs
   (let [tmp (fs/create-temp-dir)
         combined-path (fs/path tmp "leda-cosmides-diarized-combined.json")
         final-path (fs/path tmp "leda-cosmides-transcript.md")]
@@ -305,11 +293,10 @@
              :speaker-map-path "custom-speaker-map.json"}]
            @calls))))
 
-(deftest episode-page-generation-preserves-node-output-and-static-contracts
+(deftest episode-page-generation-preserves-static-contracts
   (let [tmp (fs/create-temp-dir)
         transcript-path (fs/path tmp "combined.json")
         audio-path (fs/path tmp "fixture.mp3")
-        node-out (fs/path tmp "node-web")
         bb-out (fs/path tmp "bb-web")
         slug "fixture-episode"
         title "Fixture & Episode"
@@ -337,26 +324,100 @@
     (spit (str audio-path) "fake audio")
     (fs/create-dirs (fs/path bb-out "assets"))
     (spit (str (fs/path bb-out "assets" "player.js")) "compiled player")
-    (generate-node-page! {:slug slug
-                          :title title
-                          :transcript transcript-path
-                          :audio audio-path
-                          :out-dir node-out})
     (episode-page/generate! {:slug slug
                              :title title
                              :transcript transcript-path
                              :audio audio-path
                              :out-dir bb-out})
-    (let [node-episode-dir (fs/path node-out "episodes" slug)
-          bb-episode-dir (fs/path bb-out "episodes" slug)
-          node-html (slurp (str (fs/path node-episode-dir "index.html")))
+    (let [bb-episode-dir (fs/path bb-out "episodes" slug)
           bb-html (slurp (str (fs/path bb-episode-dir "index.html")))
           bb-static-html (strip-script-bodies bb-html)]
-      (testing "semantic transcript JSON matches the Node generator"
-        (is (= (read-json (fs/path node-episode-dir "transcript.json"))
+      (testing "semantic transcript JSON keeps the public shape"
+        (is (= {:slug slug
+                :title title
+                :source "https://example.test/episode?x=1&y=2"
+                :published "Thu, 14 May 2026 12:00:00 +0000"
+                :duration_seconds 65.7
+                :speaker_names {:DPz "Dave Pietraszewski"
+                                :DPi "David Pinsof"
+                                :LC "Leda Cosmides"
+                                :UNK "Uncertain speaker"}
+                :segments [{:id "intro"
+                            :speaker "DPz"
+                            :start 0
+                            :end 1.5
+                            :text "Hello, Leda Cosmides & friends."}
+                           {:id "follow"
+                            :speaker "DPz"
+                            :start 2
+                            :end 3
+                            :text "Same turn <with markup>."}
+                           {:id "segment_2"
+                            :speaker "LC"
+                            :start 7.25
+                            :end 9
+                            :text "A new turn."}]
+                :turns [{:speaker "DPz"
+                         :start 0
+                         :end 3
+                         :phrase_ids ["intro" "follow"]}
+                        {:speaker "LC"
+                         :start 7.25
+                         :end 9
+                         :phrase_ids ["segment_2"]}]}
                (read-json (fs/path bb-episode-dir "transcript.json")))))
-      (testing "generated HTML matches the Node generator modulo line endings"
-        (is (= (normalize-html node-html)
+      (testing "generated HTML is stable modulo line endings"
+        (is (= (normalize-html
+                (str "<!doctype html>\n"
+                     "<html lang=\"en\">\n"
+                     "<head>\n"
+                     "  <meta charset=\"utf-8\">\n"
+                     "  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n"
+                     "  <title>Fixture &amp; Episode</title>\n"
+                     "  <link rel=\"stylesheet\" href=\"../../assets/styles.css\">\n"
+                     "</head>\n"
+                     "<body>\n"
+                     "  <header class=\"player-shell\">\n"
+                     "    <div class=\"episode-kicker\">Evolutionary Psychology Podcast</div>\n"
+                     "    <div class=\"episode-heading\">\n"
+                     "      <h1>Fixture &amp; Episode</h1>\n"
+                     "      <div class=\"episode-meta\">\n"
+                     "        <span>Thu, 14 May 2026 12:00:00 +0000</span>\n"
+                     "        <span>01:05</span>\n"
+                     "        <a href=\"https://example.test/episode?x=1&amp;y=2\">Source episode</a>\n"
+                     "      </div>\n"
+                     "    </div>\n"
+                     "    <div class=\"audio-row\">\n"
+                     "      <audio id=\"episode-audio\" controls preload=\"metadata\" src=\"../../assets/audio/fixture-episode.mp3\"></audio>\n"
+                     "      <button class=\"follow-button\" type=\"button\" data-follow-toggle aria-pressed=\"true\">Following transcript</button>\n"
+                     "    </div>\n"
+                     "  </header>\n"
+                     "\n"
+                     "  <main class=\"page\">\n"
+                     "    <section class=\"transcript-shell\" aria-label=\"Transcript\">\n"
+                     "      <article class=\"turn\" id=\"turn-0\" data-speaker=\"DPz\">\n"
+                     "  <header class=\"turn-meta\">\n"
+                     "    <a class=\"timestamp\" href=\"#phrase-0\" data-seek=\"0\">00:00</a>\n"
+                     "    <span class=\"speaker-code\">DPz</span>\n"
+                     "    <span class=\"speaker-name\">Dave Pietraszewski</span>\n"
+                     "  </header>\n"
+                     "  <p><span class=\"phrase\" id=\"phrase-0\" data-phrase-index=\"0\" data-start=\"0\" data-end=\"1.5\" role=\"button\" tabindex=\"0\">Hello, Leda Cosmides &amp; friends.</span> <span class=\"phrase\" id=\"phrase-1\" data-phrase-index=\"1\" data-start=\"2\" data-end=\"3\" role=\"button\" tabindex=\"0\">Same turn &lt;with markup&gt;.</span></p>\n"
+                     "</article>\n"
+                     "<article class=\"turn\" id=\"turn-1\" data-speaker=\"LC\">\n"
+                     "  <header class=\"turn-meta\">\n"
+                     "    <a class=\"timestamp\" href=\"#phrase-2\" data-seek=\"7.25\">00:07</a>\n"
+                     "    <span class=\"speaker-code\">LC</span>\n"
+                     "    <span class=\"speaker-name\">Leda Cosmides</span>\n"
+                     "  </header>\n"
+                     "  <p><span class=\"phrase\" id=\"phrase-2\" data-phrase-index=\"2\" data-start=\"7.25\" data-end=\"9\" role=\"button\" tabindex=\"0\">A new turn.</span></p>\n"
+                     "</article>\n"
+                     "    </section>\n"
+                     "  </main>\n"
+                     "\n"
+                     "  <script id=\"transcript-data\" type=\"application/json\">{\"slug\":\"fixture-episode\",\"title\":\"Fixture & Episode\",\"source\":\"https://example.test/episode?x=1&y=2\",\"published\":\"Thu, 14 May 2026 12:00:00 +0000\",\"duration_seconds\":65.7,\"speaker_names\":{\"DPz\":\"Dave Pietraszewski\",\"DPi\":\"David Pinsof\",\"LC\":\"Leda Cosmides\",\"UNK\":\"Uncertain speaker\"},\"segments\":[{\"id\":\"intro\",\"speaker\":\"DPz\",\"start\":0,\"end\":1.5,\"text\":\"Hello, Leda Cosmides & friends.\"},{\"id\":\"follow\",\"speaker\":\"DPz\",\"start\":2,\"end\":3,\"text\":\"Same turn \\u003cwith markup>.\"},{\"id\":\"segment_2\",\"speaker\":\"LC\",\"start\":7.25,\"end\":9,\"text\":\"A new turn.\"}],\"turns\":[{\"speaker\":\"DPz\",\"start\":0,\"end\":3,\"phrase_ids\":[\"intro\",\"follow\"]},{\"speaker\":\"LC\",\"start\":7.25,\"end\":9,\"phrase_ids\":[\"segment_2\"]}]}</script>\n"
+                     "  <script src=\"../../assets/player.js\"></script>\n"
+                     "</body>\n"
+                     "</html>\n"))
                (normalize-html bb-html))))
       (testing "audio and shared assets land in the same public web paths"
         (is (= "fake audio"
@@ -376,7 +437,7 @@
         (is (str/includes? bb-static-html "A new turn."))
         (is (str/includes? bb-static-html "00:07"))))))
 
-(deftest episode-page-cli-preserves-node-option-validation
+(deftest episode-page-cli-preserves-option-validation
   (testing "unexpected positional arguments"
     (is (thrown-with-msg?
          clojure.lang.ExceptionInfo

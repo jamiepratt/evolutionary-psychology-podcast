@@ -257,13 +257,13 @@
              (fs/path assets-dir "styles.css")
              {:replace-existing true})
     (let [player-target (fs/path assets-dir "player.js")
-          built-player (fs/path "web" "assets" "player.js")
-          legacy-player (fs/path "web_assets" "player.js")
-          player-source (if (fs/exists? built-player)
-                          built-player
-                          legacy-player)]
-      (when-not (fs/exists? player-target)
-        (fs/copy player-source player-target)))))
+          built-player (fs/path "web" "assets" "player.js")]
+      (when-not (fs/exists? built-player)
+        (throw (ex-info "Compiled player asset is missing. Run npm run build:player first."
+                        {:path (str built-player)})))
+      (when-not (or (= (str player-target) (str built-player))
+                    (fs/exists? player-target))
+        (fs/copy built-player player-target)))))
 
 (defn- extension [path]
   (or (second (re-find #"(\.[^./\\]+)$" (str path))) ".mp3"))
