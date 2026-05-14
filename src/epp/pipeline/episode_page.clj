@@ -253,10 +253,17 @@
 (defn- copy-shared-assets! [out-dir]
   (let [assets-dir (fs/path out-dir "assets")]
     (fs/create-dirs assets-dir)
-    (doseq [name ["player.js" "styles.css"]]
-      (fs/copy (fs/path "web_assets" name)
-               (fs/path assets-dir name)
-               {:replace-existing true}))))
+    (fs/copy (fs/path "web_assets" "styles.css")
+             (fs/path assets-dir "styles.css")
+             {:replace-existing true})
+    (let [player-target (fs/path assets-dir "player.js")
+          built-player (fs/path "web" "assets" "player.js")
+          legacy-player (fs/path "web_assets" "player.js")
+          player-source (if (fs/exists? built-player)
+                          built-player
+                          legacy-player)]
+      (when-not (fs/exists? player-target)
+        (fs/copy player-source player-target)))))
 
 (defn- extension [path]
   (or (second (re-find #"(\.[^./\\]+)$" (str path))) ".mp3"))

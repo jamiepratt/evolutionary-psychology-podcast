@@ -1,8 +1,11 @@
 .DS_Store
 logs/
+node_modules/
+.shadow-cljs/
+web/**/*.map
+web/assets/manifest.edn
 
 # Source and intermediate audio are large local build inputs. The deployable
 # episode audio lives under web/assets/audio.
 audio/
 !web/assets/audio/
-
