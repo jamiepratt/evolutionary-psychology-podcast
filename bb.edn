@@ -4,6 +4,7 @@
              [epp.pipeline.episode-page :as episode-page]
              [epp.pipeline.manifest :as manifest]
              [epp.pipeline.merge :as merge]
+             [epp.pipeline.transcribe :as transcribe]
              [epp.pipeline.validation :as validation])
   extract-metadata {:doc "Write sources/episode-selected.json from sources/episode-selected.xml."
                     :task (metadata/extract!)}
@@ -11,6 +12,8 @@
                          :task (manifest/build!)}
   merge-transcripts {:doc "Write combined diarized JSON and final markdown transcript."
                      :task (merge/merge!)}
+  transcribe-chunks {:doc "Transcribe audio chunks with OpenAI's diarized transcription API."
+                     :task (apply transcribe/-main *command-line-args*)}
   generate-episode-page {:doc "Write the static episode page and public transcript assets."
                          :task (apply episode-page/-main *command-line-args*)}
   validate-outputs {:doc "Write transcripts/combined/validation-report.json and fail on validation errors."

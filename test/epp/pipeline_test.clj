@@ -9,6 +9,7 @@
             [epp.pipeline.manifest :as manifest]
             [epp.pipeline.merge :as merge]
             [epp.pipeline.metadata :as metadata]
+            [epp.pipeline.transcribe :as transcribe]
             [epp.pipeline.validation :as validation]))
 
 (defn- read-json [path]
@@ -132,6 +133,138 @@
            (read-json combined-path)))
     (is (= (normalize-markdown (slurp "transcripts/final/leda-cosmides-transcript.md"))
            (normalize-markdown (slurp (str final-path)))))))
+
+(deftest transcribe-builds-compatible-openai-curl-request
+  (let [tmp (fs/create-temp-dir)
+        audio (fs/path tmp "chunk.mp3")
+        speaker-ref (fs/path tmp "leda.wav")
+        manifest-path (fs/path tmp "chunks-manifest.json")
+        speaker-map-path (fs/path tmp "speaker-map.json")
+        raw-dir (fs/path tmp "raw")
+        requests (atom [])]
+    (spit (str audio) "audio bytes")
+    (spit (str speaker-ref) "ref")
+    (write-json! manifest-path
+                 {:chunks [{:index 7
+                            :path (str audio)}]})
+    (write-json! speaker-map-path
+                 {:speakers [{:initials "LC"
+                              :reference_clip (str speaker-ref)}
+                             {:initials "DPz"}]})
+    (transcribe/transcribe! {:manifest-path manifest-path
+                             :speaker-map-path speaker-map-path
+                             :out-dir raw-dir
+                             :env {"OPENAI_API_KEY" "test-key"}
+                             :curl-fn (fn [args]
+                                        (swap! requests conj args)
+                                        {:exit 0
+                                         :out "{\"segments\":[]}"
+                                         :err ""})})
+    (is (= [(str (fs/path raw-dir "chunk_007.json"))]
+           (mapv str (fs/list-dir raw-dir))))
+    (is (= "{\"segments\":[]}\n"
+           (slurp (str (fs/path raw-dir "chunk_007.json")))))
+    (is (= [["--silent"
+             "--show-error"
+             "--fail-with-body"
+             "--max-time"
+             "3600"
+             "https://api.openai.com/v1/audio/transcriptions"
+             "--header"
+             "Authorization: Bearer test-key"
+             "--form"
+             (str "file=@" audio ";type=audio/mpeg")
+             "--form-string"
+             "model=gpt-4o-transcribe-diarize"
+             "--form-string"
+             "response_format=diarized_json"
+             "--form-string"
+             "chunking_strategy=auto"
+             "--form-string"
+             "language=en"
+             "--form-string"
+             "known_speaker_names[]=LC"
+             "--form-string"
+             "known_speaker_references[]=data:audio/wav;base64,cmVm"]]
+           @requests))))
+
+(deftest transcribe-skips-existing-outputs-and-honors-environment-filters
+  (let [tmp (fs/create-temp-dir)
+        manifest-path (fs/path tmp "chunks-manifest.json")
+        speaker-map-path (fs/path tmp "missing-speaker-map.json")
+        raw-dir (fs/path tmp "raw")
+        requests (atom [])]
+    (write-json! manifest-path
+                 {:chunks [{:index 0 :path "audio/chunks/zero.mp3"}
+                           {:index 1 :path "audio/chunks/one.mp3"}
+                           {:index 2 :path "audio/chunks/two.mp3"}]})
+    (fs/create-dirs raw-dir)
+    (spit (str (fs/path raw-dir "selected_001.json")) "{\"existing\":true}\n")
+    (transcribe/transcribe! {:manifest-path manifest-path
+                             :speaker-map-path speaker-map-path
+                             :out-dir raw-dir
+                             :env {"OPENAI_API_KEY" "test-key"
+                                   "ONLY_CHUNKS" "1, 2"
+                                   "OUTPUT_PREFIX" "selected"}
+                             :curl-fn (fn [args]
+                                        (swap! requests conj args)
+                                        {:exit 0
+                                         :out "{\"new\":true}\n"
+                                         :err ""})})
+    (is (= "{\"existing\":true}\n"
+           (slurp (str (fs/path raw-dir "selected_001.json")))))
+    (is (= "{\"new\":true}\n"
+           (slurp (str (fs/path raw-dir "selected_002.json")))))
+    (is (not (fs/exists? (fs/path raw-dir "selected_000.json"))))
+    (is (= [(str "file=@audio/chunks/two.mp3;type=audio/mpeg")]
+           (->> @requests
+                (mapcat #(partition 2 %))
+                (keep (fn [[flag value]]
+                        (when (= "--form" flag) value)))
+                vec)))))
+
+(deftest transcribe-requires-openai-api-key-before-calling-curl
+  (let [called? (atom false)]
+    (is (thrown-with-msg?
+         clojure.lang.ExceptionInfo
+         #"OPENAI_API_KEY is not set\."
+         (transcribe/transcribe! {:manifest-path "missing.json"
+                                  :env {}
+                                  :curl-fn (fn [_]
+                                             (reset! called? true)
+                                             {:exit 0 :out "{}" :err ""})})))
+    (is (false? @called?))))
+
+(deftest transcribe-writes-error-file-for-api-failures
+  (let [tmp (fs/create-temp-dir)
+        manifest-path (fs/path tmp "chunks-manifest.json")
+        raw-dir (fs/path tmp "raw")]
+    (write-json! manifest-path
+                 {:chunks [{:index 3
+                            :path "audio/chunks/three.mp3"}]})
+    (is (thrown-with-msg?
+         clojure.lang.ExceptionInfo
+         #"OpenAI API error or curl failure; wrote .*chunk_003\.error\.txt"
+         (transcribe/transcribe! {:manifest-path manifest-path
+                                  :speaker-map-path (fs/path tmp "missing-speaker-map.json")
+                                  :out-dir raw-dir
+                                  :env {"OPENAI_API_KEY" "test-key"}
+                                  :curl-fn (fn [_]
+                                             {:exit 22
+                                              :out "{\"error\":\"bad request\"}"
+                                              :err "curl failed"})})))
+    (is (= "{\"error\":\"bad request\"}\ncurl failed"
+           (slurp (str (fs/path raw-dir "chunk_003.error.txt")))))
+    (is (not (fs/exists? (fs/path raw-dir "chunk_003.json"))))))
+
+(deftest transcribe-cli-preserves-positional-manifest-and-speaker-map-args
+  (let [calls (atom [])]
+    (with-redefs [transcribe/transcribe! (fn [options]
+                                           (swap! calls conj options))]
+      (transcribe/-main "custom-manifest.json" "custom-speaker-map.json"))
+    (is (= [{:manifest-path "custom-manifest.json"
+             :speaker-map-path "custom-speaker-map.json"}]
+           @calls))))
 
 (deftest episode-page-generation-preserves-node-output-and-static-contracts
   (let [tmp (fs/create-temp-dir)
