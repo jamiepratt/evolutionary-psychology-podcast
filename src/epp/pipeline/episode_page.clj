@@ -207,7 +207,16 @@
 (defn- json-script-data [public-transcript]
   (str/replace (json/generate-string public-transcript) "<" "\\u003c"))
 
-(defn- render-html [{:keys [config transcript public-transcript turns names audio-href]}]
+(defn- render-waveform-mount [waveform]
+  (when waveform
+    (str "      <div id=\"episode-waveform\" data-waveform-url=\""
+         (escape-html (:url waveform))
+         "\""
+         (when (number? (:duration_seconds waveform))
+           (str " data-waveform-duration=\"" (:duration_seconds waveform) "\""))
+         "></div>\n")))
+
+(defn- render-html [{:keys [config transcript public-transcript turns names audio-href waveform]}]
   (let [title (or (:title config)
                   (get-in transcript [:metadata :title])
                   "Episode Transcript")
@@ -238,6 +247,7 @@
          "      <audio id=\"episode-audio\" controls preload=\"metadata\" src=\""
          (escape-html audio-href)
          "\"></audio>\n"
+         (render-waveform-mount waveform)
          "      <button class=\"follow-button\" type=\"button\" data-follow-toggle aria-pressed=\"true\">Following transcript</button>\n"
          "    </div>\n"
          "  </header>\n"
@@ -284,24 +294,36 @@
                       {:path (str source)})))
     (fs/copy source target {:replace-existing true})))
 
-(defn- public-transcript [{:keys [config transcript names segments turns]}]
-  (array-map
-   :slug (:slug config)
-   :title (or (:title config)
-              (get-in transcript [:metadata :title])
-              "Episode Transcript")
-   :source (get-in transcript [:metadata :link] nil)
-   :published (get-in transcript [:metadata :pubDate] nil)
-   :duration_seconds (:duration_seconds transcript nil)
-   :speaker_names names
-   :segments segments
-   :turns (mapv (fn [turn]
-                  (array-map
-                   :speaker (:speaker turn)
-                   :start (:start turn)
-                   :end (:end turn)
-                   :phrase_ids (mapv :id (:phrases turn))))
-                turns)))
+(defn- waveform-metadata [out-dir slug transcript]
+  (let [artifact-path (fs/path out-dir "assets" "waveforms" (str slug ".json"))]
+    (when (fs/exists? artifact-path)
+      (let [artifact (pipeline-json/read-json artifact-path)
+            duration (or (:duration_seconds artifact)
+                         (:duration_seconds transcript))]
+        (cond-> (array-map :url (str "../../assets/waveforms/" slug ".json"))
+          (number? duration) (assoc :duration_seconds duration))))))
+
+(defn- public-transcript [{:keys [config transcript names segments turns waveform]}]
+  (apply array-map
+         (concat
+          [:slug (:slug config)
+           :title (or (:title config)
+                      (get-in transcript [:metadata :title])
+                      "Episode Transcript")
+           :source (get-in transcript [:metadata :link] nil)
+           :published (get-in transcript [:metadata :pubDate] nil)
+           :duration_seconds (:duration_seconds transcript nil)
+           :speaker_names names
+           :segments segments
+           :turns (mapv (fn [turn]
+                          (array-map
+                           :speaker (:speaker turn)
+                           :start (:start turn)
+                           :end (:end turn)
+                           :phrase_ids (mapv :id (:phrases turn))))
+                        turns)]
+          (when waveform
+            [:waveform waveform]))))
 
 (defn generate!
   ([] (generate! {}))
@@ -317,17 +339,20 @@
          audio-dir (fs/path out-dir "assets" "audio")
          audio-file (str (:slug config) (extension (:audio config)))
          audio-target (fs/path audio-dir audio-file)
+         waveform (waveform-metadata out-dir (:slug config) transcript)
          public-transcript (public-transcript {:config config
                                                :transcript transcript
                                                :names names
                                                :segments segments
-                                               :turns turns})
+                                               :turns turns
+                                               :waveform waveform})
          html (render-html {:config config
                             :transcript transcript
                             :public-transcript public-transcript
                             :turns turns
                             :names names
-                            :audio-href (str "../../assets/audio/" audio-file)})]
+                            :audio-href (str "../../assets/audio/" audio-file)
+                            :waveform waveform})]
      (fs/create-dirs episode-dir)
      (fs/create-dirs audio-dir)
      (copy-shared-assets! out-dir)

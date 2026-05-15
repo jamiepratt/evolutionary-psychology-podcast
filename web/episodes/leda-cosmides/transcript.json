@@ -15843,5 +15843,9 @@
         "chunk_006_seg_94"
       ]
     }
-  ]
+  ],
+  "waveform": {
+    "url": "../../assets/waveforms/leda-cosmides.json",
+    "duration_seconds": 7431.340438
+  }
 }

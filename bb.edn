@@ -5,7 +5,8 @@
              [epp.pipeline.manifest :as manifest]
              [epp.pipeline.merge :as merge]
              [epp.pipeline.transcribe :as transcribe]
-             [epp.pipeline.validation :as validation])
+             [epp.pipeline.validation :as validation]
+             [epp.pipeline.waveform :as waveform])
   extract-metadata {:doc "Write sources/episode-selected.json from sources/episode-selected.xml."
                     :task (metadata/extract!)}
   build-chunks-manifest {:doc "Write audio/chunks-manifest.json from audio/chunks/*.mp3."
@@ -18,5 +19,7 @@
                          :task (apply episode-page/-main *command-line-args*)}
   validate-outputs {:doc "Write transcripts/combined/validation-report.json and fail on validation errors."
                     :task (validation/validate!)}
+  generate-waveform {:doc "Write web/assets/waveforms/<episode-slug>.json from episode audio."
+                     :task (apply waveform/-main *command-line-args*)}
   test {:doc "Run Babashka pipeline tests."
         :task ((requiring-resolve 'epp.pipeline-test-runner/-main))}}}

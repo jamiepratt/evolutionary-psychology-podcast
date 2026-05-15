@@ -9,7 +9,8 @@
             [epp.pipeline.merge :as merge]
             [epp.pipeline.metadata :as metadata]
             [epp.pipeline.transcribe :as transcribe]
-            [epp.pipeline.validation :as validation]))
+            [epp.pipeline.validation :as validation]
+            [epp.pipeline.waveform :as waveform]))
 
 (defn- read-json [path]
   (json/parse-string (slurp (str path)) true))
@@ -114,6 +115,87 @@
                       :duration_seconds 2
                       :byte_size 5}]}
            (read-json out)))))
+
+(deftest waveform-generation-writes-deployable-peak-artifact
+  (let [tmp (fs/create-temp-dir)
+        out-dir (fs/path tmp "web")
+        source-audio (fs/path tmp "fixture-episode.mp3")
+        calls (atom [])
+        sample-bytes (byte-array
+                      (mapcat (fn [sample]
+                                [(bit-and sample 0xff)
+                                 (bit-and (bit-shift-right sample 8) 0xff)])
+                              [-32768 -10000 0 10000 12000 32767 -12000 0]))
+        process-fn (fn [args opts]
+                     (swap! calls conj {:args args :opts opts})
+                     (case (first args)
+                       "ffprobe" {:exit 0 :out "2.0\n" :err ""}
+                       "ffmpeg" {:exit 0 :out sample-bytes :err ""}
+                       {:exit 127 :out "" :err "unexpected command"}))]
+    (spit (str source-audio) "fake mp3")
+    (waveform/generate! {:slug "fixture-episode"
+                         :source-audio source-audio
+                         :out-dir out-dir
+                         :sample-rate-hz 4
+                         :resolutions {:fine {:samples-per-peak 2}
+                                       :coarse {:samples-per-peak 4}}
+                         :process-fn process-fn})
+    (is (= {:schema_version 1
+            :slug "fixture-episode"
+            :source_audio (str source-audio)
+            :duration_seconds 2
+            :sample_rate_hz 4
+            :resolutions {:fine {:samples_per_peak 2
+                                 :window_seconds 0.5
+                                 :peak_count 4
+                                 :peaks [[-1 -0.305176]
+                                         [0 0.305185]
+                                         [0.366222 1]
+                                         [-0.366211 0]]}
+                          :coarse {:samples_per_peak 4
+                                   :window_seconds 1
+                                   :peak_count 2
+                                   :peaks [[-1 0.305185]
+                                           [-0.366211 1]]}}}
+           (read-json (fs/path out-dir "assets" "waveforms" "fixture-episode.json"))))
+    (is (= [["ffprobe"
+             "-v" "error"
+             "-show_entries" "format=duration"
+             "-of" "default=noprint_wrappers=1:nokey=1"
+             (str source-audio)]
+            ["ffmpeg"
+             "-v" "error"
+             "-i" (str source-audio)
+             "-ac" "1"
+             "-ar" "4"
+             "-f" "s16le"
+             "-"]]
+           (mapv :args @calls)))))
+
+(deftest waveform-generation-requires-local-source-before-writing
+  (let [tmp (fs/create-temp-dir)
+        out-dir (fs/path tmp "web")
+        waveform-path (fs/path out-dir "assets" "waveforms" "missing-episode.json")
+        transcript-path (fs/path out-dir "episodes" "missing-episode" "transcript.json")
+        audio-path (fs/path out-dir "assets" "audio" "missing-episode.mp3")
+        called? (atom false)]
+    (write-json! waveform-path {:existing true})
+    (write-json! transcript-path {:transcript true})
+    (fs/create-dirs (fs/parent audio-path))
+    (spit (str audio-path) "existing audio")
+    (is (thrown-with-msg?
+         clojure.lang.ExceptionInfo
+         #"Source audio is missing: .*missing-episode\.mp3"
+         (waveform/generate! {:slug "missing-episode"
+                              :source-audio (fs/path tmp "missing-episode.mp3")
+                              :out-dir out-dir
+                              :process-fn (fn [_ _]
+                                            (reset! called? true)
+                                            {:exit 0 :out "" :err ""})})))
+    (is (false? @called?))
+    (is (= {:existing true} (read-json waveform-path)))
+    (is (= {:transcript true} (read-json transcript-path)))
+    (is (= "existing audio" (slurp (str audio-path))))))
 
 (deftest validation-report-preserves-current-checks-and-output-shape
   (let [tmp (fs/create-temp-dir)
@@ -440,6 +522,48 @@
         (is (str/includes? bb-static-html "Same turn &lt;with markup&gt;."))
         (is (str/includes? bb-static-html "A new turn."))
         (is (str/includes? bb-static-html "00:07"))))))
+
+(deftest episode-page-generation-exposes-available-waveform-metadata
+  (let [tmp (fs/create-temp-dir)
+        transcript-path (fs/path tmp "combined.json")
+        audio-path (fs/path tmp "fixture.mp3")
+        out-dir (fs/path tmp "web")
+        slug "fixture-episode"
+        transcript {:metadata {:title "Metadata title"}
+                    :duration_seconds 65.7
+                    :segments [{:id "intro"
+                                :speaker "DPz"
+                                :start 0
+                                :end 1.5
+                                :text "Hello."}]}
+        waveform-path (fs/path out-dir "assets" "waveforms" (str slug ".json"))]
+    (write-json! transcript-path transcript)
+    (write-json! waveform-path {:schema_version 1
+                                :slug slug
+                                :duration_seconds 12.345
+                                :resolutions {}})
+    (spit (str audio-path) "fake audio")
+    (fs/create-dirs (fs/path out-dir "assets"))
+    (spit (str (fs/path out-dir "assets" "player.js")) "compiled player")
+    (episode-page/generate! {:slug slug
+                             :transcript transcript-path
+                             :audio audio-path
+                             :out-dir out-dir})
+    (let [episode-dir (fs/path out-dir "episodes" slug)
+          html (slurp (str (fs/path episode-dir "index.html")))
+          public-transcript (read-json (fs/path episode-dir "transcript.json"))]
+      (testing "public transcript JSON points to the waveform artifact"
+        (is (= {:url "../../assets/waveforms/fixture-episode.json"
+                :duration_seconds 12.345}
+               (:waveform public-transcript))))
+      (testing "HTML exposes a progressive enhancement mount near the native audio"
+        (is (str/includes? html
+                           "<audio id=\"episode-audio\" controls preload=\"metadata\" src=\"../../assets/audio/fixture-episode.mp3\"></audio>"))
+        (is (str/includes? html
+                           "<div id=\"episode-waveform\" data-waveform-url=\"../../assets/waveforms/fixture-episode.json\" data-waveform-duration=\"12.345\"></div>"))
+        (is (< (str/index-of html "<audio id=\"episode-audio\"")
+               (str/index-of html "id=\"episode-waveform\"")
+               (str/index-of html "data-follow-toggle")))))))
 
 (deftest episode-page-generation-can-use-committed-public-audio
   (let [tmp (fs/create-temp-dir)

@@ -13214,5 +13214,9 @@
         "chunk_004_seg_345"
       ]
     }
-  ]
+  ],
+  "waveform": {
+    "url": "../../assets/waveforms/hugo-mercier.json",
+    "duration_seconds": 5874.834313
+  }
 }

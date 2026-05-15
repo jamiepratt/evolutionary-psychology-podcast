@@ -84,6 +84,65 @@ audio {
   width: 100%;
 }
 
+#episode-waveform {
+  max-width: 980px;
+  margin-top: 10px;
+}
+
+.waveform-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.waveform-window-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.waveform-controls button {
+  min-height: 34px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--ink);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.86rem;
+  font-weight: 700;
+  padding: 5px 10px;
+}
+
+.waveform-controls button[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+#episode-waveform canvas {
+  display: block;
+  width: 100%;
+  height: 96px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--panel) 82%, var(--accent-soft));
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+#episode-waveform canvas:focus {
+  outline: 3px solid var(--focus);
+  outline-offset: 3px;
+}
+
+#episode-waveform[data-waveform-state="fallback"] {
+  display: none;
+}
+
 .follow-button {
   min-height: 36px;
   border: 1px solid var(--accent);
@@ -187,6 +246,22 @@ audio {
   }
 
   .follow-button {
+    width: 100%;
+  }
+
+  .waveform-controls {
+    align-items: stretch;
+  }
+
+  .waveform-window-controls {
+    display: none;
+  }
+
+  #episode-waveform canvas {
+    height: 64px;
+  }
+
+  .waveform-controls button[data-waveform-recenter] {
     width: 100%;
   }
 
