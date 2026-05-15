@@ -87,6 +87,7 @@ audio {
 #episode-waveform {
   max-width: 980px;
   margin-top: 10px;
+  position: relative;
 }
 
 .waveform-controls {
@@ -137,6 +138,37 @@ audio {
 #episode-waveform canvas:focus {
   outline: 3px solid var(--focus);
   outline-offset: 3px;
+}
+
+.waveform-editor-handles {
+  bottom: 0;
+  height: 96px;
+  left: 0;
+  pointer-events: none;
+  position: absolute;
+  right: 0;
+}
+
+.waveform-boundary-handle {
+  appearance: none;
+  background: var(--accent);
+  border: 2px solid var(--panel);
+  border-radius: 999px;
+  box-shadow: 0 0 0 2px var(--accent), 0 6px 16px rgba(25, 23, 20, 0.18);
+  cursor: ew-resize;
+  height: 24px;
+  margin-left: -6px;
+  padding: 0;
+  pointer-events: auto;
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 12px;
+}
+
+.phrase.is-selected-segment {
+  background: var(--accent-soft);
+  box-shadow: 0 0 0 2px var(--accent);
 }
 
 #episode-waveform[data-waveform-state="fallback"] {
@@ -258,6 +290,10 @@ audio {
   }
 
   #episode-waveform canvas {
+    height: 64px;
+  }
+
+  .waveform-editor-handles {
     height: 64px;
   }
 

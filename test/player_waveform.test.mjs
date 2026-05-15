@@ -390,6 +390,84 @@ test("waveform exposes window presets and keyboard playback controls", async () 
   dom.window.close();
 });
 
+test("opt-in editor mode selects phrase segments and shows waveform boundary handles", async () => {
+  const defaultPlayer = startPlayer();
+  await new Promise((resolve) => defaultPlayer.window.setTimeout(resolve, 10));
+  assert.equal(defaultPlayer.window.document.querySelector("#episode-waveform").dataset.editorMode, undefined);
+  assert.equal(defaultPlayer.window.document.querySelector("[data-waveform-boundary]"), null);
+  defaultPlayer.dom.window.close();
+
+  const { dom, window } = startPlayer({
+    html: transcriptHtml({
+      waveformAttrs: 'data-waveform-url="/waveform.json" data-waveform-duration="60" data-waveform-editor="true"',
+    }),
+  });
+  const { document } = window;
+  const mount = document.querySelector("#episode-waveform");
+
+  await new Promise((resolve) => window.setTimeout(resolve, 10));
+  document.querySelector("#phrase-2").click();
+  await new Promise((resolve) => window.setTimeout(resolve, 10));
+
+  assert.equal(mount.dataset.editorMode, "true");
+  assert.equal(mount.dataset.followMode, "false");
+  assert.equal(mount.dataset.selectedSegmentId, "phrase-2");
+  assert.equal(document.querySelector("#phrase-2").classList.contains("is-selected-segment"), true);
+  assert.equal(Number(mount.dataset.visibleStart) > 0, true);
+  assert.equal(Number(mount.dataset.visibleStart) < 34, true);
+  assert.equal(Number(mount.dataset.visibleEnd) > 40, true);
+
+  const startHandle = mount.querySelector('[data-waveform-boundary="start"]');
+  const endHandle = mount.querySelector('[data-waveform-boundary="end"]');
+  assert.equal(startHandle.dataset.segmentId, "phrase-2");
+  assert.equal(endHandle.dataset.segmentId, "phrase-2");
+  assert.equal(startHandle.classList.contains("is-selected-segment"), true);
+  assert.equal(endHandle.classList.contains("is-selected-segment"), true);
+
+  dom.window.close();
+});
+
+test("editor boundary dragging emits structured millisecond-capable edit events", async () => {
+  const { dom, window } = startPlayer({
+    html: transcriptHtml({
+      waveformAttrs: 'data-waveform-url="/waveform.json" data-waveform-duration="60" data-waveform-editor="true"',
+    }),
+  });
+  const { document } = window;
+  const mount = document.querySelector("#episode-waveform");
+  const events = [];
+  mount.addEventListener("waveform-edit", (event) => events.push({ ...event.detail }));
+
+  await new Promise((resolve) => window.setTimeout(resolve, 10));
+  document.querySelector("#phrase-1").click();
+  await new Promise((resolve) => window.setTimeout(resolve, 10));
+
+  const startHandle = mount.querySelector('[data-waveform-boundary="start"]');
+  startHandle.dispatchEvent(new window.MouseEvent("mousedown", {
+    bubbles: true,
+    clientX: 260,
+  }));
+  window.dispatchEvent(new window.MouseEvent("mousemove", {
+    bubbles: true,
+    clientX: 250,
+  }));
+  window.dispatchEvent(new window.MouseEvent("mouseup", {
+    bubbles: true,
+    clientX: 250,
+  }));
+  await new Promise((resolve) => window.setTimeout(resolve, 10));
+
+  assert.deepEqual(events, [{
+    segmentId: "phrase-1",
+    segmentKind: "phrase",
+    boundary: "start",
+    oldTime: 14,
+    newTime: 13.25,
+  }]);
+
+  dom.window.close();
+});
+
 test("waveform fetch failures fall back without breaking transcript seeking", async () => {
   const { audio, dom, window } = startPlayer({
     fetchImpl: () => Promise.reject(new Error("network unavailable")),

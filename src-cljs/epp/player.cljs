@@ -6,7 +6,8 @@
 (defonce player-state (r/atom {:active-index -1
                                :follow? true
                                :waveform-window-seconds 30
-                               :waveform-center-time nil}))
+                               :waveform-center-time nil
+                               :selected-segment-id nil}))
 
 (def waveform-window-presets [{:seconds 30 :label "30s"}
                               {:seconds 120 :label "2min"}
@@ -22,13 +23,14 @@
   (some-> element .-dataset (aget key)))
 
 (defn- phrase-record [element]
-  {:element element
+  {:id (or (some-> element .-id) "")
+   :kind "phrase"
+   :element element
    :start (number-value (dataset-value element "start"))
    :end (number-value (dataset-value element "end"))})
 
 (defn- phrase-id [phrase]
-  (or (some-> phrase :element .-id)
-      ""))
+  (or (:id phrase) ""))
 
 (defn- query-all [selector]
   (array-seq (.querySelectorAll js/document selector)))
@@ -176,6 +178,20 @@
 (defn- set-dataset! [element key value]
   (aset (.-dataset element) key (str value)))
 
+(defn- remove-dataset! [element key]
+  (js-delete (.-dataset element) key))
+
+(defn- editor-mode? [mount]
+  (= "true" (dataset-value mount "waveformEditor")))
+
+(defn- selected-segment [segments]
+  (let [selected-id (:selected-segment-id @player-state)]
+    (some #(when (= selected-id (:id %)) %) segments)))
+
+(defn- clear-selected-segment! [segments]
+  (doseq [segment segments]
+    (.. (:element segment) -classList (remove "is-selected-segment"))))
+
 (defn- visible-window [duration center-time window-seconds]
   (let [duration (max 0 (or duration 0))
         window-seconds (max 1 (or window-seconds default-waveform-window-seconds))
@@ -197,6 +213,86 @@
                 (clamp 0 1 (/ offset width))
                 0)]
     (+ visible-start (* ratio (- visible-end visible-start)))))
+
+(defn- millisecond-time [seconds]
+  (/ (js/Math.round (* seconds 1000)) 1000))
+
+(defn- segment-center [segment]
+  (/ (+ (:start segment) (:end segment)) 2))
+
+(defn- segment-x [width visible-start visible-end time]
+  (if (> visible-end visible-start)
+    (* width (/ (- time visible-start) (- visible-end visible-start)))
+    0))
+
+(defn- handle-container! [mount canvas]
+  (or (.querySelector mount ".waveform-editor-handles")
+      (let [container (.createElement js/document "div")]
+        (.setAttribute container "class" "waveform-editor-handles")
+        (.insertBefore mount container (.-nextSibling canvas))
+        container)))
+
+(defn- boundary-handle! [container boundary]
+  (or (.querySelector container (str "[data-waveform-boundary='" boundary "']"))
+      (let [handle (.createElement js/document "button")]
+        (.setAttribute handle "type" "button")
+        (.setAttribute handle "class" "waveform-boundary-handle is-selected-segment")
+        (.setAttribute handle "data-waveform-boundary" boundary)
+        (.setAttribute handle "aria-label" (str "Adjust segment " boundary))
+        (.appendChild container handle)
+        handle)))
+
+(defn- position-boundary-handle! [handle segment boundary width visible-start visible-end]
+  (let [time (if (= boundary "start") (:start segment) (:end segment))
+        x (clamp 0 width (segment-x width visible-start visible-end time))]
+    (set-dataset! handle "segmentId" (:id segment))
+    (set-dataset! handle "segmentKind" (:kind segment))
+    (set! (.. handle -style -left) (str x "px"))))
+
+(defn- render-boundary-handles! [mount canvas segments visible-start visible-end]
+  (if-let [segment (selected-segment segments)]
+    (let [{:keys [width]} (canvas-size canvas)
+          container (handle-container! mount canvas)]
+      (set-dataset! mount "editorMode" true)
+      (set-dataset! mount "selectedSegmentId" (:id segment))
+      (.setAttribute container "data-selected-segment-id" (:id segment))
+      (position-boundary-handle! (boundary-handle! container "start") segment "start" width visible-start visible-end)
+      (position-boundary-handle! (boundary-handle! container "end") segment "end" width visible-start visible-end))
+    (do
+      (remove-dataset! mount "selectedSegmentId")
+      (when-let [container (.querySelector mount ".waveform-editor-handles")]
+        (set! (.-textContent container) "")))))
+
+(defn- select-segment! [mount segments segment schedule-render!]
+  (clear-selected-segment! segments)
+  (swap! player-state assoc
+         :selected-segment-id (:id segment)
+         :waveform-center-time (segment-center segment)
+         :follow? false)
+  (.. (:element segment) -classList (add "is-selected-segment"))
+  (set-dataset! mount "selectedSegmentId" (:id segment))
+  (schedule-render!))
+
+(defn- boundary-time [segment boundary]
+  (if (= boundary "start")
+    (:start segment)
+    (:end segment)))
+
+(defn- emit-boundary-edit! [mount canvas drag event]
+  (let [visible-start (number-value (dataset-value mount "visibleStart"))
+        visible-end (number-value (dataset-value mount "visibleEnd"))
+        segment (:segment drag)
+        boundary (:boundary drag)]
+    (when (and visible-start visible-end segment boundary)
+      (let [new-time (millisecond-time (click-time canvas visible-start visible-end event))
+            detail #js {:segmentId (:id segment)
+                        :segmentKind (:kind segment)
+                        :boundary boundary
+                        :oldTime (boundary-time segment boundary)
+                        :newTime new-time}]
+        (.dispatchEvent mount (js/CustomEvent. "waveform-edit"
+                                               #js {:bubbles true
+                                                    :detail detail}))))))
 
 (defn- update-waveform-controls! [mount]
   (let [selected (:waveform-window-seconds @player-state)]
@@ -273,7 +369,9 @@
       (let [playhead-x (if (> end start)
                          (* width (/ (- current-time start) (- end start)))
                          0)]
-        (.fillRect context (clamp 0 width playhead-x) 0 2 height)))))
+        (.fillRect context (clamp 0 width playhead-x) 0 2 height))
+      (when (editor-mode? mount)
+        (render-boundary-handles! mount canvas phrases start end)))))
 
 (defn- waveform-control-button [label attrs]
   (let [button (.createElement js/document "button")]
@@ -304,10 +402,13 @@
       (when (seq url)
         (set-dataset! mount "waveformState" "loading")
         (set-dataset! mount "followMode" true)
+        (when (editor-mode? mount)
+          (set-dataset! mount "editorMode" true))
         (let [controls (mount-waveform-controls! mount)
               canvas (.createElement js/document "canvas")
               waveform-state (atom nil)
-              render-frame (atom nil)]
+              render-frame (atom nil)
+              boundary-drag (atom nil)]
           (.setAttribute canvas "tabindex" "0")
           (.setAttribute canvas "role" "slider")
           (.setAttribute canvas "aria-label" "Audio waveform")
@@ -366,6 +467,25 @@
                  (when (and visible-start visible-end)
                    (seek-from-waveform! (click-time canvas visible-start visible-end event))))))
             (.addEventListener
+             mount
+             "mousedown"
+             (fn [event]
+               (when-let [handle (some-> event .-target (.closest "[data-waveform-boundary]"))]
+                 (.preventDefault event)
+                 (let [segment-id (dataset-value handle "segmentId")
+                       boundary (dataset-value handle "waveformBoundary")]
+                   (when-let [segment (some #(when (= segment-id (:id %)) %) phrases)]
+                     (reset! boundary-drag {:segment segment
+                                            :boundary boundary}))))))
+            (.addEventListener
+             js/window
+             "mouseup"
+             (fn [event]
+               (when-let [drag @boundary-drag]
+                 (reset! boundary-drag nil)
+                 (emit-boundary-edit! mount canvas drag event)
+                 (schedule-render!))))
+            (.addEventListener
              canvas
              "keydown"
              (fn [event]
@@ -398,21 +518,25 @@
             (when (.-ResizeObserver js/window)
               (let [observer (js/ResizeObserver. (fn [_] (schedule-render!)))]
                 (.observe observer canvas)))
-            schedule-render!))))))
+            {:render! schedule-render!
+             :select-segment! (fn [segment]
+                                (when (editor-mode? mount)
+                                  (select-segment! mount phrases segment schedule-render!)))}))))))
 
 (defn- install-player! []
   (let [audio (.querySelector js/document "#episode-audio")
         transcript-root (.querySelector js/document ".transcript-shell")
         follow-button (.querySelector js/document "[data-follow-toggle]")
         phrases (mapv phrase-record (query-all ".phrase"))
-        render-waveform! (atom nil)
+        waveform-api (atom nil)
         suppress-scroll-pause? (atom false)
         scroll-pause-timer (atom 0)]
     (when (and audio transcript-root (seq phrases))
       (reset! player-state {:active-index -1
                             :follow? true
                             :waveform-window-seconds default-waveform-window-seconds
-                            :waveform-center-time nil})
+                            :waveform-center-time nil
+                            :selected-segment-id nil})
       (mount-follow-state! follow-button)
       (letfn [(scroll-active-into-view! [element]
                 (reset! suppress-scroll-pause? true)
@@ -426,7 +550,7 @@
               (sync! ([] (sync! true))
                 ([should-scroll?]
                  (sync-to-audio! audio phrases scroll-active-into-view! should-scroll?)
-                 (when-let [render! @render-waveform!]
+                 (when-let [render! (:render! @waveform-api)]
                    (render!))))
               (seek! [seconds]
                 (seek-to! audio phrases follow-button scroll-active-into-view! seconds))]
@@ -437,7 +561,13 @@
            (let [target (.-target event)
                  phrase (when target (.closest target ".phrase"))]
              (if phrase
-               (seek! (number-value (dataset-value phrase "start")))
+               (let [segment (some #(when (= phrase (:element %)) %) phrases)]
+                 (if-let [select! (:select-segment! @waveform-api)]
+                   (when segment
+                     (set! (.-currentTime audio) (max 0 (or (number-value (dataset-value phrase "start")) 0)))
+                     (sync-to-audio! audio phrases scroll-active-into-view! false)
+                     (select! segment))
+                   (seek! (number-value (dataset-value phrase "start")))))
                (when-let [timestamp (when target (.closest target "[data-seek]"))]
                  (.preventDefault event)
                  (seek! (number-value (dataset-value timestamp "seek"))))))))
@@ -480,7 +610,7 @@
            (sync! true)))
         (.addEventListener audio "loadedmetadata" #(sync! false))
         (update-follow-button! follow-button)
-        (reset! render-waveform!
+        (reset! waveform-api
                 (install-waveform! audio phrases follow-button scroll-active-into-view!))
         (sync! false)))))
 
