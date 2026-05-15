@@ -79,6 +79,28 @@ ${phrases}
 </html>`;
 }
 
+function transcriptHtmlWithSegments({ waveformAttrs = 'data-waveform-url="/waveform.json" data-waveform-duration="60" data-waveform-editor="true"', segments }) {
+  const phrases = segments.map(({ id, start, end, text }, index) => `      <article class="turn" id="turn-${index}">
+        <p><span class="phrase" id="${id}" data-start="${start}" data-end="${end}" role="button" tabindex="0">${text ?? id}</span></p>
+      </article>`).join("\n");
+
+  return `<!doctype html>
+<html>
+<body>
+  <header>
+    <audio id="episode-audio"></audio>
+    <button type="button" data-follow-toggle aria-pressed="true">Following transcript</button>
+    <div id="episode-waveform" ${waveformAttrs}></div>
+  </header>
+  <main>
+    <section class="transcript-shell" aria-label="Transcript">
+${phrases}
+    </section>
+  </main>
+</body>
+</html>`;
+}
+
 function startPlayer({ fetchImpl, html = baseHtml, animationFrame = "timeout" } = {}) {
   const dom = new JSDOM(html, {
     pretendToBeVisual: true,
@@ -464,6 +486,110 @@ test("editor boundary dragging emits structured millisecond-capable edit events"
     oldTime: 14,
     newTime: 13.25,
   }]);
+
+  dom.window.close();
+});
+
+test("editor end-boundary dragging couples the touching next phrase start and previews the edit", async () => {
+  const { audio, dom, window } = startPlayer({
+    html: transcriptHtmlWithSegments({
+      segments: [
+        { id: "phrase-0", start: 0, end: 10, text: "First." },
+        { id: "phrase-1", start: 10, end: 20, text: "Middle." },
+        { id: "phrase-2", start: 20, end: 30, text: "Next." },
+      ],
+    }),
+  });
+  const { document } = window;
+  const mount = document.querySelector("#episode-waveform");
+  const events = [];
+  mount.addEventListener("waveform-edit", (event) => events.push({ ...event.detail }));
+
+  await new Promise((resolve) => window.setTimeout(resolve, 10));
+  await audio.play();
+  document.querySelector("#phrase-1").click();
+  await new Promise((resolve) => window.setTimeout(resolve, 10));
+
+  const endHandle = mount.querySelector('[data-waveform-boundary="end"]');
+  endHandle.dispatchEvent(new window.MouseEvent("mousedown", {
+    bubbles: true,
+    clientX: 367,
+  }));
+  assert.equal(audio.paused, true);
+
+  window.dispatchEvent(new window.MouseEvent("mousemove", {
+    bubbles: true,
+    clientX: 420,
+  }));
+  window.dispatchEvent(new window.MouseEvent("mouseup", {
+    bubbles: true,
+    clientX: 420,
+  }));
+  await new Promise((resolve) => window.setTimeout(resolve, 10));
+
+  assert.equal(audio.paused, false);
+  assert.equal(audio.currentTime < 24, true);
+  assert.equal(audio.currentTime >= 23.4, true);
+  assert.deepEqual(events, [{
+    segmentId: "phrase-1",
+    segmentKind: "phrase",
+    boundary: "end",
+    oldTime: 20,
+    newTime: 24,
+    coupledSegmentId: "phrase-2",
+    coupledBoundary: "start",
+    coupledOldTime: 20,
+    coupledNewTime: 24,
+  }]);
+  assert.equal(document.querySelector("#phrase-1").dataset.end, "20");
+  assert.equal(document.querySelector("#phrase-2").dataset.start, "20");
+
+  dom.window.close();
+});
+
+test("editor start-boundary dragging couples a nearly touching previous phrase end", async () => {
+  const { dom, window } = startPlayer({
+    html: transcriptHtmlWithSegments({
+      segments: [
+        { id: "phrase-0", start: 0, end: 9.95, text: "First." },
+        { id: "phrase-1", start: 10, end: 20, text: "Middle." },
+        { id: "phrase-2", start: 20, end: 30, text: "Next." },
+      ],
+    }),
+  });
+  const { document } = window;
+  const mount = document.querySelector("#episode-waveform");
+  const events = [];
+  mount.addEventListener("waveform-edit", (event) => events.push({ ...event.detail }));
+
+  await new Promise((resolve) => window.setTimeout(resolve, 10));
+  document.querySelector("#phrase-1").click();
+  await new Promise((resolve) => window.setTimeout(resolve, 10));
+
+  const startHandle = mount.querySelector('[data-waveform-boundary="start"]');
+  startHandle.dispatchEvent(new window.MouseEvent("mousedown", {
+    bubbles: true,
+    clientX: 233,
+  }));
+  window.dispatchEvent(new window.MouseEvent("mouseup", {
+    bubbles: true,
+    clientX: 180,
+  }));
+  await new Promise((resolve) => window.setTimeout(resolve, 10));
+
+  assert.deepEqual(events, [{
+    segmentId: "phrase-1",
+    segmentKind: "phrase",
+    boundary: "start",
+    oldTime: 10,
+    newTime: 6,
+    coupledSegmentId: "phrase-0",
+    coupledBoundary: "end",
+    coupledOldTime: 9.95,
+    coupledNewTime: 6,
+  }]);
+  assert.equal(document.querySelector("#phrase-0").dataset.end, "9.95");
+  assert.equal(document.querySelector("#phrase-1").dataset.start, "10");
 
   dom.window.close();
 });

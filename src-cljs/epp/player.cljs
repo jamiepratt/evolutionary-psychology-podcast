@@ -13,6 +13,8 @@
                               {:seconds 120 :label "2min"}
                               {:seconds 300 :label "5min"}])
 (def default-waveform-window-seconds 30)
+(def boundary-touch-tolerance-seconds 0.1)
+(def boundary-preview-preroll-seconds 0.5)
 
 (defn- number-value [value]
   (let [n (js/Number value)]
@@ -273,26 +275,123 @@
   (set-dataset! mount "selectedSegmentId" (:id segment))
   (schedule-render!))
 
-(defn- boundary-time [segment boundary]
-  (if (= boundary "start")
-    (:start segment)
-    (:end segment)))
+(defn- draft-segment [segment draft-timings]
+  (if-let [draft (get draft-timings (:id segment))]
+    (merge segment draft)
+    segment))
 
-(defn- emit-boundary-edit! [mount canvas drag event]
+(defn- apply-draft-timings [segments draft-timings]
+  (mapv #(draft-segment % draft-timings) segments))
+
+(defn- touching-boundaries? [left-time right-time]
+  (<= (js/Math.abs (- left-time right-time))
+      boundary-touch-tolerance-seconds))
+
+(defn- segment-index-by-id [segments segment-id]
+  (first (keep-indexed (fn [index segment]
+                         (when (= segment-id (:id segment))
+                           index))
+                       segments)))
+
+(defn- boundary-edit-result [segments drag new-time]
+  (let [segment (:segment drag)
+        boundary (:boundary drag)
+        index (segment-index-by-id segments (:id segment))]
+    (when (and segment boundary index)
+      (let [current-segment (nth segments index)
+            previous-segment (when (pos? index) (nth segments (dec index)))
+            next-segment (when (< (inc index) (count segments)) (nth segments (inc index)))]
+        (case boundary
+          "start"
+          (let [coupled? (and previous-segment
+                              (touching-boundaries? (:end previous-segment)
+                                                    (:start current-segment)))
+                clamped-time (millisecond-time
+                              (if coupled?
+                                (clamp (:start previous-segment)
+                                       (:end current-segment)
+                                       new-time)
+                                (clamp (or (:end previous-segment)
+                                           0)
+                                       (:end current-segment)
+                                       new-time)))]
+            (cond-> {:segment current-segment
+                     :boundary boundary
+                     :old-time (:start current-segment)
+                     :new-time clamped-time
+                     :drafts {(:id current-segment) {:start clamped-time}}}
+              coupled? (assoc :coupled {:segment previous-segment
+                                        :boundary "end"
+                                        :old-time (:end previous-segment)
+                                        :new-time clamped-time}
+                              :drafts {(:id current-segment) {:start clamped-time}
+                                       (:id previous-segment) {:end clamped-time}})))
+
+          "end"
+          (let [coupled? (and next-segment
+                              (touching-boundaries? (:end current-segment)
+                                                    (:start next-segment)))
+                clamped-time (millisecond-time
+                              (if coupled?
+                                (clamp (:start current-segment)
+                                       (:end next-segment)
+                                       new-time)
+                                (clamp (:start current-segment)
+                                       (or (:start next-segment)
+                                           js/Number.POSITIVE_INFINITY)
+                                       new-time)))]
+            (cond-> {:segment current-segment
+                     :boundary boundary
+                     :old-time (:end current-segment)
+                     :new-time clamped-time
+                     :drafts {(:id current-segment) {:end clamped-time}}}
+              coupled? (assoc :coupled {:segment next-segment
+                                        :boundary "start"
+                                        :old-time (:start next-segment)
+                                        :new-time clamped-time}
+                              :drafts {(:id current-segment) {:end clamped-time}
+                                       (:id next-segment) {:start clamped-time}})))
+          nil)))))
+
+(defn- merge-drafts [draft-timings edits]
+  (reduce-kv (fn [drafts segment-id timing]
+               (update drafts segment-id merge timing))
+             draft-timings
+             edits))
+
+(defn- boundary-edit-detail [result]
+  (let [segment (:segment result)
+        coupled (:coupled result)]
+    (clj->js
+     (cond-> {:segmentId (:id segment)
+              :segmentKind (:kind segment)
+              :boundary (:boundary result)
+              :oldTime (:old-time result)
+              :newTime (:new-time result)}
+       coupled (assoc :coupledSegmentId (:id (:segment coupled))
+                      :coupledBoundary (:boundary coupled)
+                      :coupledOldTime (:old-time coupled)
+                      :coupledNewTime (:new-time coupled))))))
+
+(defn- preview-boundary-edit! [audio time]
+  (set! (.-currentTime audio) (max 0 (- time boundary-preview-preroll-seconds)))
+  (when-let [play-result (.play audio)]
+    (when (.-catch play-result)
+      (.catch play-result (fn [_])))))
+
+(defn- emit-boundary-edit! [mount canvas audio segments draft-timings drag event]
   (let [visible-start (number-value (dataset-value mount "visibleStart"))
         visible-end (number-value (dataset-value mount "visibleEnd"))
-        segment (:segment drag)
-        boundary (:boundary drag)]
-    (when (and visible-start visible-end segment boundary)
-      (let [new-time (millisecond-time (click-time canvas visible-start visible-end event))
-            detail #js {:segmentId (:id segment)
-                        :segmentKind (:kind segment)
-                        :boundary boundary
-                        :oldTime (boundary-time segment boundary)
-                        :newTime new-time}]
+        raw-time (when (and visible-start visible-end)
+                   (click-time canvas visible-start visible-end event))]
+    (when-let [result (when raw-time
+                        (boundary-edit-result segments drag raw-time))]
+      (let [detail (boundary-edit-detail result)]
+        (swap! draft-timings merge-drafts (:drafts result))
         (.dispatchEvent mount (js/CustomEvent. "waveform-edit"
                                                #js {:bubbles true
-                                                    :detail detail}))))))
+                                                    :detail detail}))
+        (preview-boundary-edit! audio (:new-time result))))))
 
 (defn- update-waveform-controls! [mount]
   (let [selected (:waveform-window-seconds @player-state)]
@@ -408,14 +507,17 @@
               canvas (.createElement js/document "canvas")
               waveform-state (atom nil)
               render-frame (atom nil)
-              boundary-drag (atom nil)]
+              boundary-drag (atom nil)
+              draft-timings (atom {})]
           (.setAttribute canvas "tabindex" "0")
           (.setAttribute canvas "role" "slider")
           (.setAttribute canvas "aria-label" "Audio waveform")
           (.appendChild mount canvas)
-          (letfn [(render-now! []
+          (letfn [(current-phrases []
+                    (apply-draft-timings phrases @draft-timings))
+                  (render-now! []
                     (when-let [waveform @waveform-state]
-                      (render-waveform! mount canvas audio phrases waveform)))
+                      (render-waveform! mount canvas audio (current-phrases) waveform)))
                   (schedule-render! []
                     (when (and (nil? @render-frame)
                                (.-requestAnimationFrame js/window))
@@ -474,7 +576,8 @@
                  (.preventDefault event)
                  (let [segment-id (dataset-value handle "segmentId")
                        boundary (dataset-value handle "waveformBoundary")]
-                   (when-let [segment (some #(when (= segment-id (:id %)) %) phrases)]
+                   (when-let [segment (some #(when (= segment-id (:id %)) %) (current-phrases))]
+                     (.pause audio)
                      (reset! boundary-drag {:segment segment
                                             :boundary boundary}))))))
             (.addEventListener
@@ -483,7 +586,7 @@
              (fn [event]
                (when-let [drag @boundary-drag]
                  (reset! boundary-drag nil)
-                 (emit-boundary-edit! mount canvas drag event)
+                 (emit-boundary-edit! mount canvas audio (current-phrases) draft-timings drag event)
                  (schedule-render!))))
             (.addEventListener
              canvas
