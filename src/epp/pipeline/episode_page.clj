@@ -2,7 +2,8 @@
   (:require [babashka.fs :as fs]
             [cheshire.core :as json]
             [clojure.string :as str]
-            [epp.pipeline.json :as pipeline-json]))
+            [epp.pipeline.json :as pipeline-json]
+            [epp.pipeline.waveform :as waveform]))
 
 (def default-config
   {:slug "leda-cosmides"
@@ -317,6 +318,8 @@
          audio-dir (fs/path out-dir "assets" "audio")
          audio-file (str (:slug config) (extension (:audio config)))
          audio-target (fs/path audio-dir audio-file)
+         waveform-manifest (fs/path episode-dir "waveform.json")
+         waveform-peaks (fs/path episode-dir "waveform.peaks")
          public-transcript (public-transcript {:config config
                                                :transcript transcript
                                                :names names
@@ -332,6 +335,11 @@
      (fs/create-dirs audio-dir)
      (copy-shared-assets! out-dir)
      (copy-audio! (:audio config) audio-target)
+     (waveform/generate! {:audio-path audio-target
+                          :manifest-path waveform-manifest
+                          :peaks-path waveform-peaks
+                          :duration-seconds (:duration_seconds transcript)
+                          :bucket-seconds waveform/default-bucket-seconds})
      (pipeline-json/write-json! (fs/path episode-dir "transcript.json") public-transcript)
      (spit (str (fs/path episode-dir "index.html")) html)
      (println (str "Generated " (fs/path episode-dir "index.html")))

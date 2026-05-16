@@ -9,7 +9,8 @@
             [epp.pipeline.merge :as merge]
             [epp.pipeline.metadata :as metadata]
             [epp.pipeline.transcribe :as transcribe]
-            [epp.pipeline.validation :as validation]))
+            [epp.pipeline.validation :as validation]
+            [epp.pipeline.waveform :as waveform]))
 
 (defn- read-json [path]
   (json/parse-string (slurp (str path)) true))
@@ -114,6 +115,38 @@
                       :duration_seconds 2
                       :byte_size 5}]}
            (read-json out)))))
+
+(deftest waveform-generation-writes-compact-binary-peaks-and-manifest
+  (let [tmp (fs/create-temp-dir)
+        audio-path (fs/path tmp "fixture.mp3")
+        manifest-path (fs/path tmp "episode" "waveform.json")
+        peaks-path (fs/path tmp "episode" "waveform.peaks")
+        ffmpeg (fs/path tmp "ffmpeg")]
+    (spit (str audio-path) "fake audio")
+    (spit (str ffmpeg)
+          (str "#!/usr/bin/env bash\n"
+               "out=\"${@: -1}\"\n"
+               "printf '\\000\\000\\377\\177\\000\\200\\000\\000' > \"$out\"\n"))
+    (.setExecutable (io/file (str ffmpeg)) true)
+    (waveform/generate! {:audio-path audio-path
+                         :manifest-path manifest-path
+                         :peaks-path peaks-path
+                         :duration-seconds 1
+                         :bucket-seconds 0.5
+                         :sample-rate 4
+                         :ffmpeg-bin (str ffmpeg)})
+    (is (= {:duration_seconds 1
+            :bucket_seconds 0.5
+            :sample_rate 4
+            :samples_per_bucket 2
+            :peak_format "s16le-min-max"
+            :bits_per_peak 16
+            :channels 1
+            :peak_count 2
+            :peaks "waveform.peaks"}
+           (read-json manifest-path)))
+    (is (= [0 0 255 127 0 128 0 0]
+           (mapv #(bit-and % 0xff) (seq (fs/read-all-bytes peaks-path)))))))
 
 (deftest validation-report-preserves-current-checks-and-output-shape
   (let [tmp (fs/create-temp-dir)
@@ -328,11 +361,23 @@
     (spit (str audio-path) "fake audio")
     (fs/create-dirs (fs/path bb-out "assets"))
     (spit (str (fs/path bb-out "assets" "player.js")) "compiled player")
-    (episode-page/generate! {:slug slug
-                             :title title
-                             :transcript transcript-path
-                             :audio audio-path
-                             :out-dir bb-out})
+    (with-redefs [waveform/generate!
+                  (fn [{:keys [manifest-path peaks-path duration-seconds bucket-seconds]}]
+                    (write-json! manifest-path
+                                 {:duration_seconds duration-seconds
+                                  :bucket_seconds bucket-seconds
+                                  :peak_format "s16le-min-max"
+                                  :bits_per_peak 16
+                                  :channels 1
+                                  :peaks "waveform.peaks"})
+                    (spit (str peaks-path) "peaks")
+                    {:duration_seconds duration-seconds
+                     :bucket_seconds bucket-seconds})]
+      (episode-page/generate! {:slug slug
+                               :title title
+                               :transcript transcript-path
+                               :audio audio-path
+                               :out-dir bb-out}))
     (let [bb-episode-dir (fs/path bb-out "episodes" slug)
           bb-html (slurp (str (fs/path bb-episode-dir "index.html")))
           bb-static-html (strip-script-bodies bb-html)]
@@ -429,6 +474,16 @@
         (is (= "compiled player"
                (slurp (str (fs/path bb-out "assets" "player.js")))))
         (is (fs/exists? (fs/path bb-out "assets" "styles.css"))))
+      (testing "waveform assets land beside the transcript page"
+        (is (= {:duration_seconds 65.7
+                :bucket_seconds 0.02
+                :peak_format "s16le-min-max"
+                :bits_per_peak 16
+                :channels 1
+                :peaks "waveform.peaks"}
+               (read-json (fs/path bb-episode-dir "waveform.json"))))
+        (is (= "peaks"
+               (slurp (str (fs/path bb-episode-dir "waveform.peaks"))))))
       (testing "player and transcript contracts remain available"
         (is (str/includes? bb-html "<audio id=\"episode-audio\" controls preload=\"metadata\" src=\"../../assets/audio/fixture-episode.mp3\"></audio>"))
         (is (str/includes? bb-html "data-follow-toggle aria-pressed=\"true\""))
@@ -462,10 +517,11 @@
     (fs/create-dirs (fs/path out-dir "assets"))
     (spit (str audio-path) "committed audio")
     (spit (str (fs/path out-dir "assets" "player.js")) "compiled player")
-    (episode-page/generate! {:slug slug
-                             :transcript transcript-path
-                             :audio audio-path
-                             :out-dir out-dir})
+    (with-redefs [waveform/generate! (fn [_] nil)]
+      (episode-page/generate! {:slug slug
+                               :transcript transcript-path
+                               :audio audio-path
+                               :out-dir out-dir}))
     (is (= "committed audio" (slurp (str audio-path))))
     (is (str/includes?
          (slurp (str (fs/path out-dir "episodes" slug "index.html")))
