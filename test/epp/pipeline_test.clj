@@ -437,8 +437,20 @@
                      "      </div>\n"
                      "    </div>\n"
                      "    <div class=\"audio-row\">\n"
-                     "      <audio id=\"episode-audio\" controls preload=\"metadata\" src=\"../../assets/audio/fixture-episode.mp3\"></audio>\n"
-                     "      <button class=\"follow-button\" type=\"button\" data-follow-toggle aria-pressed=\"true\">Following transcript</button>\n"
+                     "      <audio id=\"episode-audio\" controls preload=\"metadata\" data-waveform-manifest=\"waveform.json\" src=\"../../assets/audio/fixture-episode.mp3\"></audio>\n"
+                     "      <div class=\"custom-player\" data-custom-player hidden>\n"
+                     "        <button class=\"play-button\" type=\"button\" data-play-toggle aria-label=\"Play audio\" aria-pressed=\"false\">Play</button>\n"
+                     "        <div class=\"time-readout\" aria-live=\"off\">\n"
+                     "          <span data-current-time>00:00</span>\n"
+                     "          <span aria-hidden=\"true\">/</span>\n"
+                     "          <span data-duration>01:05</span>\n"
+                     "        </div>\n"
+                     "        <div class=\"waveform-shell\" data-waveform-container>\n"
+                     "          <canvas class=\"waveform-canvas\" data-waveform-canvas role=\"slider\" tabindex=\"0\" aria-label=\"Audio waveform seek control\" aria-valuemin=\"0\" aria-valuemax=\"65.7\" aria-valuenow=\"0\"></canvas>\n"
+                     "          <div class=\"waveform-playhead\" aria-hidden=\"true\"></div>\n"
+                     "        </div>\n"
+                     "        <button class=\"follow-button\" type=\"button\" data-follow-toggle aria-pressed=\"true\">Following transcript</button>\n"
+                     "      </div>\n"
                      "    </div>\n"
                      "  </header>\n"
                      "\n"
@@ -485,7 +497,12 @@
         (is (= "peaks"
                (slurp (str (fs/path bb-episode-dir "waveform.peaks"))))))
       (testing "player and transcript contracts remain available"
-        (is (str/includes? bb-html "<audio id=\"episode-audio\" controls preload=\"metadata\" src=\"../../assets/audio/fixture-episode.mp3\"></audio>"))
+        (is (str/includes? bb-html "<audio id=\"episode-audio\" controls preload=\"metadata\" data-waveform-manifest=\"waveform.json\" src=\"../../assets/audio/fixture-episode.mp3\"></audio>"))
+        (is (str/includes? bb-html "<div class=\"custom-player\" data-custom-player hidden>"))
+        (is (str/includes? bb-html "data-play-toggle aria-label=\"Play audio\""))
+        (is (str/includes? bb-html "data-current-time>00:00</span>"))
+        (is (str/includes? bb-html "data-duration>01:05</span>"))
+        (is (str/includes? bb-html "data-waveform-canvas role=\"slider\" tabindex=\"0\" aria-label=\"Audio waveform seek control\""))
         (is (str/includes? bb-html "data-follow-toggle aria-pressed=\"true\""))
         (is (str/includes? bb-html "id=\"phrase-0\" data-phrase-index=\"0\" data-start=\"0\" data-end=\"1.5\" role=\"button\" tabindex=\"0\""))
         (is (str/includes? bb-html "href=\"#phrase-0\" data-seek=\"0\""))
