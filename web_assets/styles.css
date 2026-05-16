@@ -73,15 +73,70 @@ h1 {
 
 .audio-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
   gap: 12px;
   align-items: center;
   margin-top: 14px;
-  max-width: 980px;
 }
 
 audio {
   width: 100%;
+}
+
+.custom-player {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  width: 100%;
+}
+
+.custom-player[hidden] {
+  display: none;
+}
+
+.play-button {
+  min-width: 56px;
+  min-height: 40px;
+  border: 1px solid var(--ink);
+  border-radius: 6px;
+  background: var(--ink);
+  color: white;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 800;
+}
+
+.time-readout {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  font-size: 0.92rem;
+  white-space: nowrap;
+}
+
+.waveform-shell {
+  position: relative;
+  min-height: 72px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  overflow: hidden;
+}
+
+.waveform-canvas {
+  display: block;
+  width: 100%;
+  height: 72px;
+}
+
+.waveform-playhead {
+  position: absolute;
+  top: 8px;
+  bottom: 8px;
+  left: 50%;
+  width: 2px;
+  background: var(--active-strong);
+  transform: translateX(-50%);
+  pointer-events: none;
 }
 
 .follow-button {
@@ -186,8 +241,18 @@ audio {
     grid-template-columns: 1fr;
   }
 
+  .custom-player {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 10px;
+  }
+
+  .waveform-shell {
+    grid-column: 1 / -1;
+    order: 3;
+  }
+
   .follow-button {
-    width: 100%;
+    width: auto;
   }
 
   .page {
