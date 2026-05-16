@@ -126,6 +126,13 @@ audio {
   display: block;
   width: 100%;
   height: 72px;
+  cursor: pointer;
+  touch-action: none;
+}
+
+.waveform-canvas:focus-visible {
+  outline: 3px solid var(--active-strong);
+  outline-offset: -4px;
 }
 
 .waveform-playhead {

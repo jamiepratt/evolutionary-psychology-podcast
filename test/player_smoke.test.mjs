@@ -47,6 +47,23 @@ async function flushAsync() {
   }
 }
 
+function pointerEvent(window, type, options = {}) {
+  const event = new window.Event(type, {
+    bubbles: true,
+    cancelable: true,
+  });
+  Object.assign(event, {
+    button: 0,
+    buttons: type === "pointerup" ? 0 : 1,
+    clientX: 0,
+    clientY: 0,
+    pointerId: 1,
+    pointerType: "mouse",
+    ...options,
+  });
+  return event;
+}
+
 function startPlayer({ waveform = false } = {}) {
   const dom = new JSDOM(html, {
     runScripts: "outside-only",
@@ -95,6 +112,18 @@ function startPlayer({ waveform = false } = {}) {
     configurable: true,
     get: () => 72,
   });
+  canvas.getBoundingClientRect = () => ({
+    bottom: 72,
+    height: 72,
+    left: 100,
+    right: 700,
+    top: 0,
+    width: 600,
+    x: 100,
+    y: 0,
+  });
+  canvas.setPointerCapture = () => {};
+  canvas.releasePointerCapture = () => {};
   let paused = true;
   Object.defineProperty(audio, "paused", {
     configurable: true,
@@ -243,6 +272,96 @@ test("compiled player loads waveform peaks and schedules canvas rendering", asyn
   assert.equal(drawCalls.some(([name]) => name === "clearRect"), true);
   assert.equal(drawCalls.some(([name]) => name === "lineTo"), true);
   assert.equal(frameCallbacks.length, 1);
+
+  dom.window.close();
+});
+
+test("compiled player seeks from waveform pointer clicks and throttled dragging", async () => {
+  const { audio, dom, frameCallbacks, scrollCalls, window } = startPlayer();
+  const { document } = window;
+  const canvas = document.querySelector("[data-waveform-canvas]");
+  const followButton = document.querySelector("[data-follow-toggle]");
+  const phrase1 = document.querySelector("#phrase-1");
+
+  followButton.click();
+  assert.equal(followButton.getAttribute("aria-pressed"), "false");
+
+  canvas.dispatchEvent(pointerEvent(window, "pointerdown", { clientX: 120 }));
+  await Promise.resolve();
+
+  assert.equal(audio.currentTime, 2);
+  assert.equal(audio.paused, false);
+  assert.equal(followButton.getAttribute("aria-pressed"), "true");
+  assert.equal(phrase1.classList.contains("is-active"), true);
+  assert.equal(canvas.getAttribute("aria-valuenow"), "2");
+  assert.equal(scrollCalls.at(-1).id, "phrase-1");
+
+  canvas.dispatchEvent(pointerEvent(window, "pointermove", { clientX: 140 }));
+  canvas.dispatchEvent(pointerEvent(window, "pointermove", { clientX: 180 }));
+
+  assert.equal(audio.currentTime, 2);
+  assert.equal(frameCallbacks.length, 1);
+
+  frameCallbacks.shift()(456);
+  await Promise.resolve();
+
+  assert.equal(audio.currentTime, 8);
+  assert.equal(canvas.getAttribute("aria-valuenow"), "8");
+
+  canvas.dispatchEvent(pointerEvent(window, "pointerup", { clientX: 180 }));
+  assert.equal(frameCallbacks.length, 0);
+
+  dom.window.close();
+});
+
+test("compiled player supports waveform keyboard seek and play-pause controls", async () => {
+  const { audio, dom, window } = startPlayer();
+  const { document } = window;
+  const canvas = document.querySelector("[data-waveform-canvas]");
+  const playButton = document.querySelector("[data-play-toggle]");
+  const phrase1 = document.querySelector("#phrase-1");
+
+  audio.currentTime = 0;
+  canvas.dispatchEvent(new window.KeyboardEvent("keydown", {
+    bubbles: true,
+    cancelable: true,
+    key: "ArrowRight",
+  }));
+  await Promise.resolve();
+
+  assert.equal(audio.currentTime, 5);
+  assert.equal(audio.paused, false);
+  assert.equal(phrase1.classList.contains("is-active"), true);
+  assert.equal(canvas.getAttribute("aria-valuenow"), "5");
+
+  canvas.dispatchEvent(new window.KeyboardEvent("keydown", {
+    bubbles: true,
+    cancelable: true,
+    key: "ArrowLeft",
+  }));
+  await Promise.resolve();
+
+  assert.equal(audio.currentTime, 0);
+  assert.equal(canvas.getAttribute("aria-valuenow"), "0");
+
+  canvas.dispatchEvent(new window.KeyboardEvent("keydown", {
+    bubbles: true,
+    cancelable: true,
+    key: " ",
+  }));
+
+  assert.equal(audio.paused, true);
+  assert.equal(playButton.textContent, "Play");
+
+  canvas.dispatchEvent(new window.KeyboardEvent("keydown", {
+    bubbles: true,
+    cancelable: true,
+    key: " ",
+  }));
+  await Promise.resolve();
+
+  assert.equal(audio.paused, false);
+  assert.equal(playButton.textContent, "Pause");
 
   dom.window.close();
 });

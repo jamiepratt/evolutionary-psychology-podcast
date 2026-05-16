@@ -46,6 +46,14 @@
       (.setAttribute play-button "aria-label" (if playing? "Pause audio" "Play audio"))
       (set! (.-textContent play-button) (if playing? "Pause" "Play")))))
 
+(defn- toggle-playback! [audio play-button]
+  (if (.-paused audio)
+    (when-let [play-result (.play audio)]
+      (when (.-catch play-result)
+        (.catch play-result (fn [_]))))
+    (.pause audio))
+  (update-play-button! play-button audio))
+
 (defn- update-time-display! [audio current-time duration-display waveform-canvas]
   (let [current (or (number-value (.-currentTime audio)) 0)
         duration (number-value (.-duration audio))]
@@ -70,6 +78,25 @@
            (.-matches (.matchMedia js/window "(max-width: 720px)")))
     30
     60))
+
+(defn- clamp-time [audio seconds]
+  (let [duration (number-value (.-duration audio))
+        lower-bound (max 0 seconds)]
+    (if (and duration (pos? duration))
+      (min duration lower-bound)
+      lower-bound)))
+
+(defn- waveform-event-time [audio canvas event]
+  (let [rect (.getBoundingClientRect canvas)
+        width (max 1 (or (number-value (.-width rect)) 0))
+        left (or (number-value (.-left rect)) 0)
+        x (-> (- (or (number-value (.-clientX event)) left) left)
+              (max 0)
+              (min width))
+        visible-seconds (viewport-seconds)
+        current (or (number-value (.-currentTime audio)) 0)
+        start-time (max 0 (- current (/ visible-seconds 2)))]
+    (clamp-time audio (+ start-time (* (/ x width) visible-seconds)))))
 
 (defn- resize-canvas! [canvas]
   (let [ratio (or (number-value (.-devicePixelRatio js/window)) 1)
@@ -232,7 +259,7 @@
 (defn- seek-to! [audio phrases follow-button scroll-active! seconds]
   (when (js/Number.isFinite seconds)
     (set-follow! follow-button true)
-    (set! (.-currentTime audio) (max 0 seconds))
+    (set! (.-currentTime audio) (clamp-time audio seconds))
     (sync-to-audio! audio phrases scroll-active! true)
     (when-let [play-result (.play audio)]
       (when (.-catch play-result)
@@ -274,7 +301,33 @@
                  (update-time-display! audio current-time duration-display waveform-canvas)
                  (sync-to-audio! audio phrases scroll-active-into-view! should-scroll?)))
               (seek! [seconds]
-                (seek-to! audio phrases follow-button scroll-active-into-view! seconds))]
+                (seek-to! audio phrases follow-button scroll-active-into-view! seconds)
+                (sync! true))
+              (seek-from-waveform! [event]
+                (.preventDefault event)
+                (seek! (waveform-event-time audio waveform-canvas event)))
+              (schedule-waveform-seek! [pending-time raf-id seconds]
+                (reset! pending-time seconds)
+                (when (zero? @raf-id)
+                  (reset! raf-id
+                          (.requestAnimationFrame
+                           js/window
+                           (fn [_]
+                             (reset! raf-id 0)
+                             (seek! @pending-time))))))
+              (handle-waveform-key! [event]
+                (let [key (.-key event)
+                      current (or (number-value (.-currentTime audio)) 0)]
+                  (case key
+                    "ArrowLeft" (do (.preventDefault event) (seek! (- current 5)))
+                    "ArrowRight" (do (.preventDefault event) (seek! (+ current 5)))
+                    "Home" (do (.preventDefault event) (seek! 0))
+                    "End" (do (.preventDefault event)
+                              (when-let [duration (number-value (.-duration audio))]
+                                (seek! duration)))
+                    (" " "Enter") (do (.preventDefault event)
+                                      (toggle-playback! audio play-button))
+                    nil)))]
         (.addEventListener
          transcript-root
          "click"
@@ -311,17 +364,46 @@
                (set-follow! follow-button follow?)
                (when follow?
                  (sync! true))))))
+        (when waveform-canvas
+          (let [dragging? (atom false)
+                pending-time (atom nil)
+                raf-id (atom 0)]
+            (.addEventListener
+             waveform-canvas
+             "pointerdown"
+             (fn [event]
+               (reset! dragging? true)
+               (when (.-setPointerCapture waveform-canvas)
+                 (.setPointerCapture waveform-canvas (.-pointerId event)))
+               (seek-from-waveform! event)))
+            (.addEventListener
+             waveform-canvas
+             "pointermove"
+             (fn [event]
+               (when @dragging?
+                 (.preventDefault event)
+                 (schedule-waveform-seek!
+                  pending-time
+                  raf-id
+                  (waveform-event-time audio waveform-canvas event)))))
+            (.addEventListener
+             waveform-canvas
+             "pointerup"
+             (fn [event]
+               (reset! dragging? false)
+               (when (.-releasePointerCapture waveform-canvas)
+                 (.releasePointerCapture waveform-canvas (.-pointerId event)))))
+            (.addEventListener
+             waveform-canvas
+             "pointercancel"
+             (fn [_]
+               (reset! dragging? false)))
+            (.addEventListener waveform-canvas "keydown" handle-waveform-key!)))
         (when play-button
           (.addEventListener
            play-button
            "click"
-           (fn [_]
-             (if (.-paused audio)
-               (when-let [play-result (.play audio)]
-                 (when (.-catch play-result)
-                   (.catch play-result (fn [_]))))
-               (.pause audio))
-             (update-play-button! play-button audio))))
+           (fn [_] (toggle-playback! audio play-button))))
         (.addEventListener audio "timeupdate" #(sync! true))
         (.addEventListener
          audio
