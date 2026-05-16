@@ -1,0 +1,11 @@
+{
+  "duration_seconds": 5874.611,
+  "bucket_seconds": 0.02,
+  "sample_rate": 8000,
+  "samples_per_bucket": 160,
+  "peak_format": "s16le-min-max",
+  "bits_per_peak": 16,
+  "channels": 1,
+  "peak_count": 293742,
+  "peaks": "waveform.peaks"
+}

@@ -18,8 +18,20 @@
       </div>
     </div>
     <div class="audio-row">
-      <audio id="episode-audio" controls preload="metadata" src="../../assets/audio/hugo-mercier.mp3"></audio>
-      <button class="follow-button" type="button" data-follow-toggle aria-pressed="true">Following transcript</button>
+      <audio id="episode-audio" controls preload="metadata" data-waveform-manifest="waveform.json" src="../../assets/audio/hugo-mercier.mp3"></audio>
+      <div class="custom-player" data-custom-player hidden>
+        <button class="play-button" type="button" data-play-toggle aria-label="Play audio" aria-pressed="false">Play</button>
+        <div class="time-readout" aria-live="off">
+          <span data-current-time>00:00</span>
+          <span aria-hidden="true">/</span>
+          <span data-duration>01:37:54</span>
+        </div>
+        <div class="waveform-shell" data-waveform-container>
+          <canvas class="waveform-canvas" data-waveform-canvas role="slider" tabindex="0" aria-label="Audio waveform seek control" aria-valuemin="0" aria-valuemax="5874.611" aria-valuenow="0"></canvas>
+          <div class="waveform-playhead" aria-hidden="true"></div>
+        </div>
+        <button class="follow-button" type="button" data-follow-toggle aria-pressed="true">Following transcript</button>
+      </div>
     </div>
   </header>
 

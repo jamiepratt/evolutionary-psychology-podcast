@@ -65,6 +65,88 @@
     (.removeAttribute audio "controls")
     (set! (.-hidden audio) true)))
 
+(defn- viewport-seconds []
+  (if (and (.-matchMedia js/window)
+           (.-matches (.matchMedia js/window "(max-width: 720px)")))
+    30
+    60))
+
+(defn- resize-canvas! [canvas]
+  (let [ratio (or (number-value (.-devicePixelRatio js/window)) 1)
+        css-width (or (number-value (.-clientWidth canvas)) 600)
+        css-height (or (number-value (.-clientHeight canvas)) 72)
+        width (long (* css-width ratio))
+        height (long (* css-height ratio))]
+    (when (or (not= (.-width canvas) width)
+              (not= (.-height canvas) height))
+      (set! (.-width canvas) width)
+      (set! (.-height canvas) height))
+    {:width width
+     :height height
+     :ratio ratio}))
+
+(defn- render-waveform! [audio canvas ctx manifest peaks]
+  (let [{:keys [width height]} (resize-canvas! canvas)
+        bucket-seconds (or (number-value (aget manifest "bucket_seconds")) 0.02)
+        peak-count (or (number-value (aget manifest "peak_count"))
+                       (/ (.-length peaks) 2))
+        visible-seconds (viewport-seconds)
+        current (or (number-value (.-currentTime audio)) 0)
+        start-time (max 0 (- current (/ visible-seconds 2)))
+        center (/ height 2)
+        scale (/ height 2)]
+    (.clearRect ctx 0 0 width height)
+    (set! (.-lineWidth ctx) 1)
+    (set! (.-strokeStyle ctx) "#0f766e")
+    (.beginPath ctx)
+    (loop [x 0]
+      (when (< x width)
+        (let [time (+ start-time (* (/ x width) visible-seconds))
+              peak-index (long (js/Math.floor (/ time bucket-seconds)))]
+          (when (and (>= peak-index 0)
+                     (< peak-index peak-count))
+            (let [min-sample (aget peaks (* peak-index 2))
+                  max-sample (aget peaks (inc (* peak-index 2)))
+                  y-top (- center (* (/ max-sample 32768) scale))
+                  y-bottom (- center (* (/ min-sample 32768) scale))]
+              (.moveTo ctx x y-top)
+              (.lineTo ctx x y-bottom))))
+        (recur (+ x 2))))
+    (.stroke ctx)))
+
+(defn- start-waveform-renderer! [audio canvas manifest peaks]
+  (when-let [ctx (when canvas (.getContext canvas "2d"))]
+    (when (.-requestAnimationFrame js/window)
+      (letfn [(draw! [_]
+                (render-waveform! audio canvas ctx manifest peaks)
+                (.requestAnimationFrame js/window draw!))]
+        (.requestAnimationFrame js/window draw!)))))
+
+(defn- load-waveform! [audio canvas]
+  (let [manifest-path (dataset-value audio "waveformManifest")]
+    (when (and canvas manifest-path (.-fetch js/window))
+      (-> (.fetch js/window manifest-path)
+          (.then (fn [manifest-response]
+                   (when (.-ok manifest-response)
+                     (-> (.json manifest-response)
+                         (.then
+                          (fn [manifest]
+                            (when-let [peaks-path (aget manifest "peaks")]
+                              (-> (.fetch js/window peaks-path)
+                                  (.then
+                                   (fn [peaks-response]
+                                     (when (.-ok peaks-response)
+                                       (.arrayBuffer peaks-response))))
+                                  (.then
+                                   (fn [array-buffer]
+                                     (when array-buffer
+                                       (start-waveform-renderer!
+                                        audio
+                                        canvas
+                                        manifest
+                                        (js/Int16Array. array-buffer)))))))))))))
+          (.catch (fn [_] nil))))))
+
 (defn- follow-state-marker []
   [:span {:data-follow-state (if (:follow? @player-state)
                                "following"
@@ -176,6 +258,7 @@
       (reset! player-state {:active-index -1
                             :follow? true})
       (enhance-custom-player! audio custom-player)
+      (load-waveform! audio waveform-canvas)
       (mount-follow-state! follow-button)
       (letfn [(scroll-active-into-view! [element]
                 (reset! suppress-scroll-pause? true)
