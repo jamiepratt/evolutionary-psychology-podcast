@@ -22,10 +22,48 @@
 (defn- query-all [selector]
   (array-seq (.querySelectorAll js/document selector)))
 
+(defn- fmt-clock [seconds]
+  (let [whole (long (max 0 (js/Math.floor (or seconds 0))))
+        hours (quot whole 3600)
+        minutes (quot (mod whole 3600) 60)
+        seconds (mod whole 60)]
+    (if (pos? hours)
+      (str (.padStart (str hours) 2 "0") ":"
+           (.padStart (str minutes) 2 "0") ":"
+           (.padStart (str seconds) 2 "0"))
+      (str (.padStart (str minutes) 2 "0") ":"
+           (.padStart (str seconds) 2 "0")))))
+
 (defn- button-label []
   (if (:follow? @player-state)
     "Following transcript"
     "Resume follow"))
+
+(defn- update-play-button! [play-button audio]
+  (when play-button
+    (let [playing? (not (.-paused audio))]
+      (.setAttribute play-button "aria-pressed" (str playing?))
+      (.setAttribute play-button "aria-label" (if playing? "Pause audio" "Play audio"))
+      (set! (.-textContent play-button) (if playing? "Pause" "Play")))))
+
+(defn- update-time-display! [audio current-time duration-display waveform-canvas]
+  (let [current (or (number-value (.-currentTime audio)) 0)
+        duration (number-value (.-duration audio))]
+    (when current-time
+      (set! (.-textContent current-time) (fmt-clock current)))
+    (when (and duration-display duration)
+      (set! (.-textContent duration-display) (fmt-clock duration)))
+    (when waveform-canvas
+      (.setAttribute waveform-canvas "aria-valuenow" (str current))
+      (when duration
+        (.setAttribute waveform-canvas "aria-valuemax" (str duration))))))
+
+(defn- enhance-custom-player! [audio custom-player]
+  (when custom-player
+    (.removeAttribute custom-player "hidden")
+    (set! (.-hidden custom-player) false)
+    (.removeAttribute audio "controls")
+    (set! (.-hidden audio) true)))
 
 (defn- follow-state-marker []
   [:span {:data-follow-state (if (:follow? @player-state)
@@ -121,13 +159,23 @@
 (defn- install-player! []
   (let [audio (.querySelector js/document "#episode-audio")
         transcript-root (.querySelector js/document ".transcript-shell")
+        custom-player (.querySelector js/document "[data-custom-player]")
+        play-button (.querySelector js/document "[data-play-toggle]")
+        current-time (.querySelector js/document "[data-current-time]")
+        duration-display (.querySelector js/document "[data-duration]")
+        waveform-canvas (.querySelector js/document "[data-waveform-canvas]")
         follow-button (.querySelector js/document "[data-follow-toggle]")
         phrases (mapv phrase-record (query-all ".phrase"))
         suppress-scroll-pause? (atom false)
         scroll-pause-timer (atom 0)]
-    (when (and audio transcript-root (seq phrases))
+    (when (and audio
+               transcript-root
+               (seq phrases)
+               (not= "true" (dataset-value audio "playerEnhanced")))
+      (.setAttribute audio "data-player-enhanced" "true")
       (reset! player-state {:active-index -1
                             :follow? true})
+      (enhance-custom-player! audio custom-player)
       (mount-follow-state! follow-button)
       (letfn [(scroll-active-into-view! [element]
                 (reset! suppress-scroll-pause? true)
@@ -140,6 +188,7 @@
                          650)))
               (sync! ([] (sync! true))
                 ([should-scroll?]
+                 (update-time-display! audio current-time duration-display waveform-canvas)
                  (sync-to-audio! audio phrases scroll-active-into-view! should-scroll?)))
               (seek! [seconds]
                 (seek-to! audio phrases follow-button scroll-active-into-view! seconds))]
@@ -179,13 +228,31 @@
                (set-follow! follow-button follow?)
                (when follow?
                  (sync! true))))))
+        (when play-button
+          (.addEventListener
+           play-button
+           "click"
+           (fn [_]
+             (if (.-paused audio)
+               (when-let [play-result (.play audio)]
+                 (when (.-catch play-result)
+                   (.catch play-result (fn [_]))))
+               (.pause audio))
+             (update-play-button! play-button audio))))
         (.addEventListener audio "timeupdate" #(sync! true))
         (.addEventListener
          audio
          "play"
          (fn [_]
            (set-follow! follow-button true)
+           (update-play-button! play-button audio)
            (sync! true)))
+        (.addEventListener
+         audio
+         "pause"
+         (fn [_]
+           (update-play-button! play-button audio)
+           (sync! false)))
         (.addEventListener
          audio
          "seeked"
@@ -193,6 +260,7 @@
            (set-follow! follow-button true)
            (sync! true)))
         (.addEventListener audio "loadedmetadata" #(sync! false))
+        (update-play-button! play-button audio)
         (update-follow-button! follow-button)
         (sync! false)))))
 

@@ -7,8 +7,20 @@ const html = `<!doctype html>
 <html>
 <body>
   <header>
-    <audio id="episode-audio"></audio>
-    <button type="button" data-follow-toggle aria-pressed="true">Following transcript</button>
+    <audio id="episode-audio" controls preload="metadata" data-waveform-manifest="waveform.json"></audio>
+    <div class="custom-player" data-custom-player hidden>
+      <button class="play-button" type="button" data-play-toggle aria-label="Play audio" aria-pressed="false">Play</button>
+      <div class="time-readout" aria-live="off">
+        <span data-current-time>00:00</span>
+        <span aria-hidden="true">/</span>
+        <span data-duration>01:05</span>
+      </div>
+      <div class="waveform-shell" data-waveform-container>
+        <canvas class="waveform-canvas" data-waveform-canvas role="slider" tabindex="0" aria-label="Audio waveform seek control" aria-valuemin="0" aria-valuemax="65.7" aria-valuenow="0"></canvas>
+        <div class="waveform-playhead" aria-hidden="true"></div>
+      </div>
+      <button type="button" data-follow-toggle aria-pressed="true">Following transcript</button>
+    </div>
   </header>
   <main>
     <section class="transcript-shell" aria-label="Transcript">
@@ -43,6 +55,10 @@ function startPlayer() {
     configurable: true,
     get: () => paused,
   });
+  Object.defineProperty(audio, "duration", {
+    configurable: true,
+    get: () => 65.7,
+  });
   audio.play = () => {
     paused = false;
     audio.dispatchEvent(new window.Event("play"));
@@ -50,9 +66,13 @@ function startPlayer() {
   };
   audio.pause = () => {
     paused = true;
+    audio.dispatchEvent(new window.Event("pause"));
   };
 
   window.eval(readFileSync("web/assets/player.js", "utf8"));
+  if (window.document.readyState === "loading") {
+    window.document.dispatchEvent(new window.Event("DOMContentLoaded"));
+  }
 
   return { audio, dom, scrollCalls, window };
 }
@@ -61,16 +81,32 @@ test("compiled transcript player preserves seeking, following, and active transc
   const { audio, dom, scrollCalls, window } = startPlayer();
   const { document } = window;
   const followButton = document.querySelector("[data-follow-toggle]");
+  const customPlayer = document.querySelector("[data-custom-player]");
+  const playButton = document.querySelector("[data-play-toggle]");
+  const currentTime = document.querySelector("[data-current-time]");
+  const duration = document.querySelector("[data-duration]");
   const phrase0 = document.querySelector("#phrase-0");
   const phrase1 = document.querySelector("#phrase-1");
   const timestamp1 = document.querySelector("[data-seek='2']");
 
+  assert.equal(customPlayer.hidden, false);
+  assert.equal(audio.hidden, true);
+  assert.equal(audio.hasAttribute("controls"), false);
   assert.equal(followButton.getAttribute("aria-pressed"), "true");
   assert.equal(followButton.textContent, "Following transcript");
+  assert.equal(playButton.getAttribute("aria-pressed"), "false");
+  assert.equal(playButton.textContent, "Play");
+  assert.equal(duration.textContent, "01:05");
 
-  await audio.play();
+  playButton.click();
+  await Promise.resolve();
+  assert.equal(audio.paused, false);
+  assert.equal(playButton.getAttribute("aria-pressed"), "true");
+  assert.equal(playButton.textContent, "Pause");
+
   audio.currentTime = 2.2;
   audio.dispatchEvent(new window.Event("timeupdate"));
+  assert.equal(currentTime.textContent, "00:02");
   assert.equal(phrase1.classList.contains("is-active"), true);
   assert.equal(phrase1.getAttribute("aria-current"), "true");
   assert.equal(document.querySelector("#turn-1").classList.contains("is-current"), true);
@@ -82,9 +118,17 @@ test("compiled transcript player preserves seeking, following, and active transc
   assert.equal(followButton.getAttribute("aria-pressed"), "false");
   assert.equal(followButton.textContent, "Resume follow");
 
+  playButton.click();
+  assert.equal(audio.paused, true);
+  assert.equal(playButton.getAttribute("aria-pressed"), "false");
+  assert.equal(playButton.textContent, "Play");
+
   phrase0.click();
   await Promise.resolve();
   assert.equal(audio.currentTime, 0);
+  assert.equal(audio.paused, false);
+  assert.equal(currentTime.textContent, "00:00");
+  assert.equal(playButton.textContent, "Pause");
   assert.equal(followButton.getAttribute("aria-pressed"), "true");
   assert.equal(phrase0.classList.contains("is-active"), true);
   assert.equal(phrase1.classList.contains("is-active"), false);
