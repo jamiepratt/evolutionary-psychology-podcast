@@ -58,6 +58,8 @@
     (is (str/includes? workflow "bb: latest"))
     (is (str/includes? workflow "actions/setup-node@v4"))
     (is (str/includes? workflow "cache: npm"))
+    (is (str/includes? workflow "Install audio waveform tooling"))
+    (is (str/includes? workflow "sudo apt-get install -y ffmpeg"))
     (doseq [command workflow-commands]
       (let [command-line (line-index lines command)]
         (is (str/includes? workflow command))
@@ -69,6 +71,8 @@
     (is (not (str/includes? workflow "path: .")))
     (is (str/includes? readme "npm ci"))
     (is (str/includes? readme "npm run build:player"))
+    (is (str/includes? readme "ffmpeg"))
+    (is (str/includes? readme "ffprobe"))
     (doseq [command ["bb extract-metadata"
                      "bb build-chunks-manifest"
                      "bb merge-transcripts"

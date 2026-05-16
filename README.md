@@ -10,6 +10,17 @@ contents of `web/` on every push to `main`.
 
 ## Build commands
 
+Install local command-line tools used by the transcript and waveform pipeline:
+
+```sh
+ffmpeg -version
+ffprobe -version
+```
+
+`ffmpeg` generates the deployable waveform peak files for the custom player.
+`ffprobe` is only needed when rebuilding `audio/chunks-manifest.json` from local
+source audio.
+
 Install the JavaScript dependencies once:
 
 ```sh

@@ -36,6 +36,11 @@ jobs:
           node-version: 20
           cache: npm
 
+      - name: Install audio waveform tooling
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
       - name: Install npm dependencies
         run: npm ci
 

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
 
@@ -57,5 +57,32 @@ test("legacy Node pipeline scripts and handwritten player source are retired", (
         `${file} should not reference retired ${legacyScriptName}`,
       );
     }
+  }
+});
+
+test("generated static web output includes deployable player and waveform assets", () => {
+  assert.equal(existsSync("web/assets/styles.css"), true, "production CSS should be deployable");
+  assert.equal(existsSync("web/assets/player.js"), true, "production player JS should be deployable");
+
+  const episodeRoot = path.join("web", "episodes");
+  const episodeSlugs = readdirSync(episodeRoot)
+    .filter((name) => statSync(path.join(episodeRoot, name)).isDirectory());
+
+  assert.notEqual(episodeSlugs.length, 0, "at least one episode should be generated");
+
+  for (const slug of episodeSlugs) {
+    const episodeDir = path.join(episodeRoot, slug);
+    const html = readFileSync(path.join(episodeDir, "index.html"), "utf8");
+    const manifest = JSON.parse(readFileSync(path.join(episodeDir, "waveform.json"), "utf8"));
+    const audioMatch = html.match(/src="\.\.\/\.\.\/assets\/audio\/([^"]+)"/);
+    const peaksPath = path.join(episodeDir, manifest.peaks);
+
+    assert.equal(existsSync(path.join(episodeDir, "transcript.json")), true, `${slug} transcript should be deployable`);
+    assert.equal(existsSync(peaksPath), true, `${slug} waveform peaks should be deployable`);
+    assert.ok(statSync(peaksPath).size > 0, `${slug} waveform peaks should not be empty`);
+    assert.equal(manifest.peak_format, "s16le-min-max");
+    assert.equal(manifest.bits_per_peak, 16);
+    assert.ok(audioMatch, `${slug} HTML should reference episode audio`);
+    assert.equal(existsSync(path.join("web", "assets", "audio", audioMatch[1])), true, `${slug} audio should be deployable`);
   }
 });

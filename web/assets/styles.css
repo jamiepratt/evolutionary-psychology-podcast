@@ -53,6 +53,7 @@ a {
   display: grid;
   gap: 8px;
   margin-top: 5px;
+  min-width: 0;
 }
 
 h1 {
@@ -61,6 +62,7 @@ h1 {
   font-size: clamp(1.45rem, 2.4vw, 2.45rem);
   line-height: 1.15;
   letter-spacing: 0;
+  overflow-wrap: anywhere;
 }
 
 .episode-meta {
@@ -76,6 +78,7 @@ h1 {
   gap: 12px;
   align-items: center;
   margin-top: 14px;
+  width: 100%;
 }
 
 audio {
@@ -88,6 +91,7 @@ audio {
   gap: 12px;
   align-items: center;
   width: 100%;
+  min-width: 0;
 }
 
 .custom-player[hidden] {
@@ -111,10 +115,13 @@ audio {
   font-variant-numeric: tabular-nums;
   font-size: 0.92rem;
   white-space: nowrap;
+  min-width: 0;
 }
 
 .waveform-shell {
   position: relative;
+  width: 100%;
+  min-width: 0;
   min-height: 72px;
   border: 1px solid var(--line);
   border-radius: 6px;
@@ -147,6 +154,7 @@ audio {
 }
 
 .follow-button {
+  min-width: 0;
   min-height: 36px;
   border: 1px solid var(--accent);
   border-radius: 6px;
@@ -157,6 +165,7 @@ audio {
   font-size: 0.9rem;
   font-weight: 700;
   padding: 6px 12px;
+  text-align: center;
   white-space: nowrap;
 }
 
@@ -215,6 +224,8 @@ audio {
 .turn p {
   margin: 0;
   font-size: 1.07rem;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .phrase {
@@ -281,5 +292,32 @@ audio {
 
   .turn p {
     font-size: 1rem;
+  }
+}
+
+@media (max-width: 520px) {
+  .custom-player {
+    grid-template-columns: minmax(52px, auto) minmax(0, 1fr);
+  }
+
+  .play-button {
+    min-width: 52px;
+    padding-inline: 10px;
+  }
+
+  .time-readout {
+    justify-self: end;
+  }
+
+  .waveform-shell {
+    grid-column: 1 / -1;
+    order: 3;
+  }
+
+  .follow-button {
+    grid-column: 1 / -1;
+    order: 4;
+    width: 100%;
+    white-space: normal;
   }
 }
