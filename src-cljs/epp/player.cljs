@@ -155,6 +155,45 @@
         (recur (inc display-x))))
     (.stroke ctx)))
 
+(defn- render-loading-waveform! [canvas ctx frame-time]
+  (let [{:keys [width height css-width ratio]} (resize-canvas! canvas)
+        seconds (/ (or (number-value frame-time) 0) 1000)
+        center (/ height 2)
+        max-height (* height 0.34)
+        step 7]
+    (.clearRect ctx 0 0 width height)
+    (set! (.-lineWidth ctx) (max 1 (* 2 ratio)))
+    (set! (.-lineCap ctx) "round")
+    (set! (.-strokeStyle ctx) "rgba(94, 234, 212, 0.5)")
+    (.beginPath ctx)
+    (loop [display-x 4]
+      (when (< display-x css-width)
+        (let [phase (+ (* seconds 3.2) (* display-x 0.055))
+              shimmer (+ 0.42 (* 0.58 (js/Math.pow (js/Math.abs (js/Math.sin phase)) 1.4)))
+              canvas-x (* display-x ratio)
+              half-height (* max-height shimmer)]
+          (.moveTo ctx canvas-x (- center half-height))
+          (.lineTo ctx canvas-x (+ center half-height)))
+        (recur (+ display-x step))))
+    (.stroke ctx)))
+
+(defn- start-waveform-loading-renderer! [canvas]
+  (when-let [ctx (when canvas (.getContext canvas "2d"))]
+    (when (.-requestAnimationFrame js/window)
+      (let [running? (atom true)
+            raf-id (atom 0)]
+        (letfn [(draw! [frame-time]
+                  (when @running?
+                    (render-loading-waveform! canvas ctx frame-time)
+                    (reset! raf-id (.requestAnimationFrame js/window draw!))))]
+          (reset! raf-id (.requestAnimationFrame js/window draw!))
+          (fn []
+            (when @running?
+              (reset! running? false)
+              (when (and (pos? @raf-id) (.-cancelAnimationFrame js/window))
+                (.cancelAnimationFrame js/window @raf-id))
+              (.clearRect ctx 0 0 (.-width canvas) (.-height canvas)))))))))
+
 (defn- start-waveform-renderer! [audio canvas manifest peaks]
   (when-let [ctx (when canvas (.getContext canvas "2d"))]
     (when (.-requestAnimationFrame js/window)
@@ -166,29 +205,43 @@
 (defn- load-waveform! [audio canvas]
   (let [manifest-path (dataset-value audio "waveformManifest")]
     (when (and canvas manifest-path (.-fetch js/window))
-      (-> (.fetch js/window manifest-path)
-          (.then (fn [manifest-response]
-                   (when (.-ok manifest-response)
-                     (-> (.json manifest-response)
-                         (.then
-                          (fn [manifest]
-                            (.setAttribute canvas "data-waveform-bucket-seconds"
-                                           (str (manifest-bucket-seconds manifest)))
-                            (when-let [peaks-path (aget manifest "peaks")]
-                              (-> (.fetch js/window peaks-path)
-                                  (.then
-                                   (fn [peaks-response]
-                                     (when (.-ok peaks-response)
-                                       (.arrayBuffer peaks-response))))
-                                  (.then
-                                   (fn [array-buffer]
-                                     (when array-buffer
-                                       (start-waveform-renderer!
-                                        audio
-                                        canvas
-                                        manifest
-                                        (js/Int16Array. array-buffer)))))))))))))
-          (.catch (fn [_] nil))))))
+      (let [stop-loading (start-waveform-loading-renderer! canvas)]
+        (letfn [(stop-loading! []
+                  (when stop-loading
+                    (stop-loading)))]
+          (-> (.fetch js/window manifest-path)
+              (.then (fn [manifest-response]
+                       (if (.-ok manifest-response)
+                         (-> (.json manifest-response)
+                             (.then
+                              (fn [manifest]
+                                (.setAttribute canvas "data-waveform-bucket-seconds"
+                                               (str (manifest-bucket-seconds manifest)))
+                                (if-let [peaks-path (aget manifest "peaks")]
+                                  (-> (.fetch js/window peaks-path)
+                                      (.then
+                                       (fn [peaks-response]
+                                         (if (.-ok peaks-response)
+                                           (.arrayBuffer peaks-response)
+                                           (do
+                                             (stop-loading!)
+                                             nil))))
+                                      (.then
+                                       (fn [array-buffer]
+                                         (if array-buffer
+                                           (do
+                                             (stop-loading!)
+                                             (start-waveform-renderer!
+                                              audio
+                                              canvas
+                                              manifest
+                                              (js/Int16Array. array-buffer)))
+                                           (stop-loading!)))))
+                                  (stop-loading!)))))
+                         (stop-loading!))))
+              (.catch (fn [_]
+                        (stop-loading!)
+                        nil))))))))
 
 (defn- follow-state-marker []
   [:span {:data-follow-state (if (:follow? @player-state)

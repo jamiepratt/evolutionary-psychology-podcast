@@ -64,7 +64,13 @@ function pointerEvent(window, type, options = {}) {
   return event;
 }
 
-function startPlayer({ waveform = false, waveformManifest = {}, waveformPeaks, canvasWidth = 600 } = {}) {
+function startPlayer({
+  waveform = false,
+  waveformManifest = {},
+  waveformPeaks,
+  canvasWidth = 600,
+  waveformPending = false,
+} = {}) {
   const dom = new JSDOM(html, {
     runScripts: "outside-only",
     url: "https://example.test/episodes/fixture/",
@@ -74,6 +80,7 @@ function startPlayer({ waveform = false, waveformManifest = {}, waveformPeaks, c
   const drawCalls = [];
   const fetchCalls = [];
   const frameCallbacks = [];
+  let nextFrameId = 1;
 
   window.Element.prototype.scrollIntoView = function scrollIntoView(options) {
     scrollCalls.push({ id: this.id, options });
@@ -94,13 +101,23 @@ function startPlayer({ waveform = false, waveformManifest = {}, waveformPeaks, c
       set strokeStyle(value) {
         drawCalls.push(["strokeStyle", value]);
       },
+      set lineCap(value) {
+        drawCalls.push(["lineCap", value]);
+      },
     };
   };
   window.requestAnimationFrame = (callback) => {
+    callback.frameId = nextFrameId;
     frameCallbacks.push(callback);
-    return frameCallbacks.length;
+    nextFrameId += 1;
+    return callback.frameId;
   };
-  window.cancelAnimationFrame = () => {};
+  window.cancelAnimationFrame = (frameId) => {
+    const callbackIndex = frameCallbacks.findIndex((callback) => callback.frameId === frameId);
+    if (callbackIndex >= 0) {
+      frameCallbacks.splice(callbackIndex, 1);
+    }
+  };
 
   const audio = window.document.querySelector("#episode-audio");
   const canvas = window.document.querySelector("[data-waveform-canvas]");
@@ -158,6 +175,9 @@ function startPlayer({ waveform = false, waveformManifest = {}, waveformPeaks, c
     );
     window.fetch = async (url) => {
       fetchCalls.push(String(url));
+      if (waveformPending) {
+        return new Promise(() => {});
+      }
       if (String(url).endsWith("waveform.json")) {
         return {
           ok: true,
@@ -259,6 +279,29 @@ test("compiled transcript player preserves seeking, following, and active transc
   followButton.click();
   assert.equal(followButton.getAttribute("aria-pressed"), "true");
   assert.equal(scrollCalls.at(-1).id, "phrase-0");
+
+  dom.window.close();
+});
+
+test("compiled player animates the waveform canvas while peaks are loading", async () => {
+  const { dom, drawCalls, fetchCalls, frameCallbacks, window } = startPlayer({
+    waveform: true,
+    waveformPending: true,
+  });
+  const canvas = window.document.querySelector("[data-waveform-canvas]");
+
+  assert.deepEqual(fetchCalls, ["waveform.json"]);
+  assert.equal(frameCallbacks.length, 1);
+
+  frameCallbacks.shift()(123);
+
+  assert.equal(canvas.width, 600);
+  assert.equal(canvas.height, 72);
+  assert.equal(drawCalls.some(([name]) => name === "clearRect"), true);
+  assert.equal(drawCalls.some(([name, value]) => name === "strokeStyle" && value === "rgba(94, 234, 212, 0.5)"), true);
+  assert.equal(drawCalls.some(([name, value]) => name === "lineCap" && value === "round"), true);
+  assert.equal(drawCalls.some(([name]) => name === "lineTo"), true);
+  assert.equal(frameCallbacks.length, 1);
 
   dom.window.close();
 });
