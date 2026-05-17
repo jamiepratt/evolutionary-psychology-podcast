@@ -74,6 +74,7 @@
     (set! (.-hidden audio) true)))
 
 (def default-bucket-seconds 0.02)
+(def waveform-pixels-per-bucket 2)
 
 (defn- clamp-time [audio seconds]
   (let [duration (number-value (.-duration audio))
@@ -86,7 +87,7 @@
   (- current (/ visible-seconds 2)))
 
 (defn- waveform-visible-seconds [display-width bucket-seconds]
-  (* (max 1 display-width) bucket-seconds))
+  (* (max 1 (/ display-width waveform-pixels-per-bucket)) bucket-seconds))
 
 (defn- canvas-bucket-seconds [canvas]
   (or (number-value (dataset-value canvas "waveformBucketSeconds"))
@@ -141,7 +142,8 @@
     (.beginPath ctx)
     (loop [display-x 0]
       (when (< display-x css-width)
-        (let [time (+ start-time (* display-x bucket-seconds))
+        (let [bucket-offset (/ display-x waveform-pixels-per-bucket)
+              time (+ start-time (* bucket-offset bucket-seconds))
               peak-index (long (js/Math.floor (/ time bucket-seconds)))
               canvas-x (* display-x ratio)]
           (when (and (>= peak-index 0)
@@ -152,7 +154,7 @@
                   y-bottom (- center (* (/ min-sample 32768) scale))]
               (.moveTo ctx canvas-x y-top)
               (.lineTo ctx canvas-x y-bottom))))
-        (recur (inc display-x))))
+        (recur (+ display-x waveform-pixels-per-bucket))))
     (.stroke ctx)))
 
 (defn- render-loading-waveform! [canvas ctx frame-time]

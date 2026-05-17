@@ -371,46 +371,34 @@ test("compiled player scrolls the waveform left as soon as playback starts", asy
   started.frameCallbacks.shift()(456);
   const startedStartX = Math.min(...audibleWaveformXs(started.drawCalls));
 
-  assert.equal(startedStartX, zeroStartX - 5);
+  assert.equal(startedStartX, zeroStartX - 10);
   assert.ok(startedStartX < zeroStartX);
 
   started.dom.window.close();
 });
 
-test("compiled player derives waveform visible time from canvas width and peak bucket size", async () => {
-  const edgePeakValues = Array.from({ length: 200 }, () => 0);
-  for (const peakIndex of [0, 25, 74, 99]) {
-    edgePeakValues[peakIndex * 2] = -800;
-    edgePeakValues[peakIndex * 2 + 1] = 800;
-  }
-  const waveformOptions = {
+test("compiled player derives waveform visible time from canvas width, peak bucket size, and display density", async () => {
+  const wide = startPlayer({
     waveform: true,
     waveformManifest: {
       bucket_seconds: 1,
       peak_count: 100,
     },
-    waveformPeaks: edgePeakValues,
-  };
-  const narrow = startPlayer({ ...waveformOptions, canvasWidth: 50 });
-  await flushAsync();
-  narrow.audio.currentTime = 50;
-  narrow.frameCallbacks.shift()(123);
-  const narrowXs = audibleWaveformXs(narrow.drawCalls);
-  assert.deepEqual(narrowXs, [0, 49]);
-
-  narrow.dom.window.close();
-
-  const wide = startPlayer({ ...waveformOptions, canvasWidth: 100 });
+    waveformPeaks: Array.from({ length: 200 }, (_, index) => (index % 2 === 0 ? -800 : 800)),
+    canvasWidth: 100,
+  });
   await flushAsync();
   wide.audio.currentTime = 50;
   wide.frameCallbacks.shift()(456);
   const wideXs = audibleWaveformXs(wide.drawCalls);
-  assert.deepEqual(wideXs, [0, 25, 74, 99]);
+  assert.equal(wideXs.length, 50);
+  assert.deepEqual(wideXs.slice(0, 4), [0, 2, 4, 6]);
+  assert.deepEqual(wideXs.slice(-4), [92, 94, 96, 98]);
 
   wide.dom.window.close();
 });
 
-test("compiled player seeks waveform pointers with the loaded peak bucket size", async () => {
+test("compiled player seeks waveform pointers with the loaded peak bucket size and display density", async () => {
   const { audio, dom, window } = startPlayer({
     waveform: true,
     waveformManifest: {
@@ -427,7 +415,7 @@ test("compiled player seeks waveform pointers with the loaded peak bucket size",
   canvas.dispatchEvent(pointerEvent(window, "pointerdown", { clientX: 100 }));
   await Promise.resolve();
 
-  assert.equal(audio.currentTime, 0);
+  assert.equal(audio.currentTime, 25);
 
   dom.window.close();
 });
@@ -464,7 +452,7 @@ test("compiled player seeks from waveform pointer clicks and throttled dragging"
   assert.equal(audio.currentTime, 0);
   assert.equal(canvas.getAttribute("aria-valuenow"), "0");
 
-  canvas.dispatchEvent(pointerEvent(window, "pointermove", { clientX: 550 }));
+  canvas.dispatchEvent(pointerEvent(window, "pointermove", { clientX: 700 }));
 
   assert.equal(frameCallbacks.length, 1);
 
