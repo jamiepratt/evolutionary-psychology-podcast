@@ -86,6 +86,9 @@
       (min duration lower-bound)
       lower-bound)))
 
+(defn- waveform-start-time [current visible-seconds]
+  (- current (/ visible-seconds 2)))
+
 (defn- waveform-event-time [audio canvas event]
   (let [rect (.getBoundingClientRect canvas)
         width (max 1 (or (number-value (.-width rect)) 0))
@@ -95,7 +98,7 @@
               (min width))
         visible-seconds (viewport-seconds)
         current (or (number-value (.-currentTime audio)) 0)
-        start-time (max 0 (- current (/ visible-seconds 2)))]
+        start-time (waveform-start-time current visible-seconds)]
     (clamp-time audio (+ start-time (* (/ x width) visible-seconds)))))
 
 (defn- resize-canvas! [canvas]
@@ -119,7 +122,7 @@
                        (/ (.-length peaks) 2))
         visible-seconds (viewport-seconds)
         current (or (number-value (.-currentTime audio)) 0)
-        start-time (max 0 (- current (/ visible-seconds 2)))
+        start-time (waveform-start-time current visible-seconds)
         center (/ height 2)
         scale (/ height 2)]
     (.clearRect ctx 0 0 width height)

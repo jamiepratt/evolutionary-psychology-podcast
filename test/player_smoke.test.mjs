@@ -64,7 +64,7 @@ function pointerEvent(window, type, options = {}) {
   return event;
 }
 
-function startPlayer({ waveform = false } = {}) {
+function startPlayer({ waveform = false, waveformManifest = {}, waveformPeaks } = {}) {
   const dom = new JSDOM(html, {
     runScripts: "outside-only",
     url: "https://example.test/episodes/fixture/",
@@ -151,8 +151,11 @@ function startPlayer({ waveform = false } = {}) {
       channels: 1,
       peak_count: 6,
       peaks: "waveform.peaks",
+      ...waveformManifest,
     };
-    const peaks = peaksBuffer([-500, 500, -1000, 1000, -250, 250, -1200, 1200, -700, 700, -50, 50]);
+    const peaks = peaksBuffer(
+      waveformPeaks ?? [-500, 500, -1000, 1000, -250, 250, -1200, 1200, -700, 700, -50, 50],
+    );
     window.fetch = async (url) => {
       fetchCalls.push(String(url));
       if (String(url).endsWith("waveform.json")) {
@@ -175,6 +178,12 @@ function startPlayer({ waveform = false } = {}) {
   }
 
   return { audio, dom, drawCalls, fetchCalls, frameCallbacks, scrollCalls, window };
+}
+
+function audibleWaveformXs(drawCalls) {
+  return drawCalls
+    .filter(([name, , y]) => name === "moveTo" && y !== 36)
+    .map(([, x]) => x);
 }
 
 test("compiled transcript player preserves seeking, following, and active transcript behavior", async () => {
@@ -276,6 +285,55 @@ test("compiled player loads waveform peaks and schedules canvas rendering", asyn
   dom.window.close();
 });
 
+test("compiled player centers the audio start at the waveform playhead", async () => {
+  const { audio, dom, drawCalls, frameCallbacks } = startPlayer({
+    waveform: true,
+    waveformManifest: {
+      bucket_seconds: 1,
+      peak_count: 4,
+    },
+    waveformPeaks: [-500, 500, -1000, 1000, -250, 250, -1200, 1200],
+  });
+
+  await flushAsync();
+  audio.currentTime = 0;
+  frameCallbacks.shift()(123);
+
+  const audibleXs = audibleWaveformXs(drawCalls);
+  assert.equal(Math.min(...audibleXs), 300);
+  assert.equal(audibleXs.some((x) => x < 300), false);
+
+  dom.window.close();
+});
+
+test("compiled player scrolls the waveform left as soon as playback starts", async () => {
+  const waveformOptions = {
+    waveform: true,
+    waveformManifest: {
+      bucket_seconds: 1,
+      peak_count: 4,
+    },
+    waveformPeaks: [-500, 500, -1000, 1000, -250, 250, -1200, 1200],
+  };
+  const zero = startPlayer(waveformOptions);
+  await flushAsync();
+  zero.audio.currentTime = 0;
+  zero.frameCallbacks.shift()(123);
+  const zeroStartX = Math.min(...audibleWaveformXs(zero.drawCalls));
+  zero.dom.window.close();
+
+  const started = startPlayer(waveformOptions);
+  await flushAsync();
+  started.audio.currentTime = 5;
+  started.frameCallbacks.shift()(456);
+  const startedStartX = Math.min(...audibleWaveformXs(started.drawCalls));
+
+  assert.equal(startedStartX, 250);
+  assert.ok(startedStartX < zeroStartX);
+
+  started.dom.window.close();
+});
+
 test("compiled player seeks from waveform pointer clicks and throttled dragging", async () => {
   const { audio, dom, frameCallbacks, scrollCalls, window } = startPlayer();
   const { document } = window;
@@ -289,26 +347,37 @@ test("compiled player seeks from waveform pointer clicks and throttled dragging"
   canvas.dispatchEvent(pointerEvent(window, "pointerdown", { clientX: 120 }));
   await Promise.resolve();
 
-  assert.equal(audio.currentTime, 2);
+  assert.equal(audio.currentTime, 0);
   assert.equal(audio.paused, false);
   assert.equal(followButton.getAttribute("aria-pressed"), "true");
-  assert.equal(phrase1.classList.contains("is-active"), true);
-  assert.equal(canvas.getAttribute("aria-valuenow"), "2");
-  assert.equal(scrollCalls.at(-1).id, "phrase-1");
+  assert.equal(phrase1.classList.contains("is-active"), false);
+  assert.equal(canvas.getAttribute("aria-valuenow"), "0");
+  assert.equal(scrollCalls.at(-1), undefined);
 
   canvas.dispatchEvent(pointerEvent(window, "pointermove", { clientX: 140 }));
   canvas.dispatchEvent(pointerEvent(window, "pointermove", { clientX: 180 }));
 
-  assert.equal(audio.currentTime, 2);
+  assert.equal(audio.currentTime, 0);
   assert.equal(frameCallbacks.length, 1);
 
   frameCallbacks.shift()(456);
   await Promise.resolve();
 
-  assert.equal(audio.currentTime, 8);
-  assert.equal(canvas.getAttribute("aria-valuenow"), "8");
+  assert.equal(audio.currentTime, 0);
+  assert.equal(canvas.getAttribute("aria-valuenow"), "0");
 
-  canvas.dispatchEvent(pointerEvent(window, "pointerup", { clientX: 180 }));
+  canvas.dispatchEvent(pointerEvent(window, "pointermove", { clientX: 430 }));
+
+  assert.equal(frameCallbacks.length, 1);
+
+  frameCallbacks.shift()(789);
+  await Promise.resolve();
+
+  assert.equal(audio.currentTime, 3);
+  assert.equal(canvas.getAttribute("aria-valuenow"), "3");
+  assert.equal(scrollCalls.at(-1).id, "phrase-1");
+
+  canvas.dispatchEvent(pointerEvent(window, "pointerup", { clientX: 430 }));
   assert.equal(frameCallbacks.length, 0);
 
   dom.window.close();
