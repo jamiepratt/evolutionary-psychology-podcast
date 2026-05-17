@@ -73,11 +73,7 @@
     (.removeAttribute audio "controls")
     (set! (.-hidden audio) true)))
 
-(defn- viewport-seconds []
-  (if (and (.-matchMedia js/window)
-           (.-matches (.matchMedia js/window "(max-width: 720px)")))
-    30
-    60))
+(def default-bucket-seconds 0.02)
 
 (defn- clamp-time [audio seconds]
   (let [duration (number-value (.-duration audio))
@@ -89,6 +85,17 @@
 (defn- waveform-start-time [current visible-seconds]
   (- current (/ visible-seconds 2)))
 
+(defn- waveform-visible-seconds [display-width bucket-seconds]
+  (* (max 1 display-width) bucket-seconds))
+
+(defn- canvas-bucket-seconds [canvas]
+  (or (number-value (dataset-value canvas "waveformBucketSeconds"))
+      default-bucket-seconds))
+
+(defn- manifest-bucket-seconds [manifest]
+  (or (number-value (aget manifest "bucket_seconds"))
+      default-bucket-seconds))
+
 (defn- waveform-event-time [audio canvas event]
   (let [rect (.getBoundingClientRect canvas)
         width (max 1 (or (number-value (.-width rect)) 0))
@@ -96,7 +103,8 @@
         x (-> (- (or (number-value (.-clientX event)) left) left)
               (max 0)
               (min width))
-        visible-seconds (viewport-seconds)
+        bucket-seconds (canvas-bucket-seconds canvas)
+        visible-seconds (waveform-visible-seconds width bucket-seconds)
         current (or (number-value (.-currentTime audio)) 0)
         start-time (waveform-start-time current visible-seconds)]
     (clamp-time audio (+ start-time (* (/ x width) visible-seconds)))))
@@ -113,35 +121,38 @@
       (set! (.-height canvas) height))
     {:width width
      :height height
+     :css-width css-width
      :ratio ratio}))
 
 (defn- render-waveform! [audio canvas ctx manifest peaks]
-  (let [{:keys [width height]} (resize-canvas! canvas)
-        bucket-seconds (or (number-value (aget manifest "bucket_seconds")) 0.02)
+  (let [{:keys [width height css-width ratio]} (resize-canvas! canvas)
+        bucket-seconds (manifest-bucket-seconds manifest)
         peak-count (or (number-value (aget manifest "peak_count"))
                        (/ (.-length peaks) 2))
-        visible-seconds (viewport-seconds)
+        visible-seconds (waveform-visible-seconds css-width bucket-seconds)
         current (or (number-value (.-currentTime audio)) 0)
         start-time (waveform-start-time current visible-seconds)
         center (/ height 2)
         scale (/ height 2)]
+    (.setAttribute canvas "data-waveform-bucket-seconds" (str bucket-seconds))
     (.clearRect ctx 0 0 width height)
     (set! (.-lineWidth ctx) 1)
     (set! (.-strokeStyle ctx) "#0f766e")
     (.beginPath ctx)
-    (loop [x 0]
-      (when (< x width)
-        (let [time (+ start-time (* (/ x width) visible-seconds))
-              peak-index (long (js/Math.floor (/ time bucket-seconds)))]
+    (loop [display-x 0]
+      (when (< display-x css-width)
+        (let [time (+ start-time (* display-x bucket-seconds))
+              peak-index (long (js/Math.floor (/ time bucket-seconds)))
+              canvas-x (* display-x ratio)]
           (when (and (>= peak-index 0)
                      (< peak-index peak-count))
             (let [min-sample (aget peaks (* peak-index 2))
                   max-sample (aget peaks (inc (* peak-index 2)))
                   y-top (- center (* (/ max-sample 32768) scale))
                   y-bottom (- center (* (/ min-sample 32768) scale))]
-              (.moveTo ctx x y-top)
-              (.lineTo ctx x y-bottom))))
-        (recur (+ x 2))))
+              (.moveTo ctx canvas-x y-top)
+              (.lineTo ctx canvas-x y-bottom))))
+        (recur (inc display-x))))
     (.stroke ctx)))
 
 (defn- start-waveform-renderer! [audio canvas manifest peaks]
@@ -161,6 +172,8 @@
                      (-> (.json manifest-response)
                          (.then
                           (fn [manifest]
+                            (.setAttribute canvas "data-waveform-bucket-seconds"
+                                           (str (manifest-bucket-seconds manifest)))
                             (when-let [peaks-path (aget manifest "peaks")]
                               (-> (.fetch js/window peaks-path)
                                   (.then
