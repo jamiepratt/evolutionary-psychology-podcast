@@ -34,17 +34,17 @@
       (str (.padStart (str minutes) 2 "0") ":"
            (.padStart (str seconds) 2 "0")))))
 
-(defn- button-label []
+(defn- follow-label []
   (if (:follow? @player-state)
-    "Following transcript"
-    "Resume follow"))
+    "Pause transcript follow"
+    "Resume transcript follow"))
 
 (defn- update-play-button! [play-button audio]
   (when play-button
     (let [playing? (not (.-paused audio))]
       (.setAttribute play-button "aria-pressed" (str playing?))
       (.setAttribute play-button "aria-label" (if playing? "Pause audio" "Play audio"))
-      (set! (.-textContent play-button) (if playing? "Pause" "Play")))))
+      (.setAttribute play-button "data-play-state" (if playing? "playing" "paused")))))
 
 (defn- clamp-percent [value]
   (-> value
@@ -319,7 +319,10 @@
 (defn- update-follow-button! [follow-button]
   (when follow-button
     (.setAttribute follow-button "aria-pressed" (str (:follow? @player-state)))
-    (set! (.-textContent follow-button) (button-label))))
+    (.setAttribute follow-button "aria-label" (follow-label))
+    (.setAttribute follow-button "data-follow-state" (if (:follow? @player-state)
+                                                       "following"
+                                                       "paused"))))
 
 (defn- set-follow! [follow-button follow?]
   (swap! player-state assoc :follow? follow?)
@@ -380,6 +383,12 @@
                (< index (count phrases)))
       (scroll-active! (:element (nth phrases index))))))
 
+(defn- scroll-active-phrase! [phrases scroll-active!]
+  (let [index (:active-index @player-state)]
+    (when (and (>= index 0)
+               (< index (count phrases)))
+      (scroll-active! (:element (nth phrases index))))))
+
 (defn- seek-to! [audio phrases follow-button scroll-active! seconds]
   (when (js/Number.isFinite seconds)
     (set-follow! follow-button true)
@@ -393,7 +402,9 @@
   (let [audio (.querySelector js/document "#episode-audio")
         transcript-root (.querySelector js/document ".transcript-shell")
         custom-player (.querySelector js/document "[data-custom-player]")
+        back-button (.querySelector js/document "[data-seek-backward]")
         play-button (.querySelector js/document "[data-play-toggle]")
+        forward-button (.querySelector js/document "[data-seek-forward]")
         current-time (.querySelector js/document "[data-current-time]")
         duration-display (.querySelector js/document "[data-duration]")
         waveform-canvas (.querySelector js/document "[data-waveform-canvas]")
@@ -438,9 +449,12 @@
                   overview-rail
                   overview-cursor)
                  (sync-to-audio! audio phrases scroll-active-into-view! should-scroll?)))
-              (seek! [seconds]
-                (seek-to! audio phrases follow-button scroll-active-into-view! seconds)
-                (sync! true))
+              (seek! ([seconds] (seek! seconds false))
+                ([seconds force-scroll?]
+                 (seek-to! audio phrases follow-button scroll-active-into-view! seconds)
+                 (sync! true)
+                 (when force-scroll?
+                   (scroll-active-phrase! phrases scroll-active-into-view!))))
               (seek-from-overview! [event]
                 (.preventDefault event)
                 (when-let [seconds (overview-event-time audio overview-rail event)]
@@ -567,6 +581,18 @@
            play-button
            "click"
            (fn [_] (toggle-playback! audio play-button))))
+        (when back-button
+          (.addEventListener
+           back-button
+           "click"
+           (fn [_]
+             (seek! (- (or (number-value (.-currentTime audio)) 0) 15) true))))
+        (when forward-button
+          (.addEventListener
+           forward-button
+           "click"
+           (fn [_]
+             (seek! (+ (or (number-value (.-currentTime audio)) 0) 30) true))))
         (.addEventListener audio "timeupdate" #(sync! true))
         (.addEventListener
          audio

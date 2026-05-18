@@ -443,11 +443,15 @@
                      "    <div class=\"audio-row\">\n"
                      "      <audio id=\"episode-audio\" controls preload=\"metadata\" data-waveform-manifest=\"waveform.json\" src=\"../../assets/audio/fixture-episode.mp3\"></audio>\n"
                      "      <div class=\"custom-player\" data-custom-player hidden>\n"
-                     "        <button class=\"play-button\" type=\"button\" data-play-toggle aria-label=\"Play audio\" aria-pressed=\"false\">Play</button>\n"
-                     "        <div class=\"time-readout\" aria-live=\"off\">\n"
-                     "          <span data-current-time>00:00</span>\n"
-                     "          <span aria-hidden=\"true\">/</span>\n"
-                     "          <span data-duration>01:05</span>\n"
+                     "        <div class=\"player-control-row\" data-player-controls>\n"
+                     "          <button class=\"seek-button seek-button-back\" type=\"button\" data-seek-backward aria-label=\"Back 15 seconds\"><span class=\"control-icon\" aria-hidden=\"true\"></span></button>\n"
+                     "          <button class=\"play-button\" type=\"button\" data-play-toggle aria-label=\"Play audio\" aria-pressed=\"false\"><span class=\"control-icon\" aria-hidden=\"true\"></span></button>\n"
+                     "          <button class=\"seek-button seek-button-forward\" type=\"button\" data-seek-forward aria-label=\"Forward 30 seconds\"><span class=\"control-icon\" aria-hidden=\"true\"></span></button>\n"
+                     "          <div class=\"time-readout\" aria-live=\"off\">\n"
+                     "            <span data-current-time>00:00</span>\n"
+                     "            <span aria-hidden=\"true\">/</span>\n"
+                     "            <span data-duration>01:05</span>\n"
+                     "          </div>\n"
                      "        </div>\n"
                      "        <div class=\"waveform-shell\" data-waveform-container>\n"
                      "          <canvas class=\"waveform-canvas\" data-waveform-canvas role=\"slider\" tabindex=\"0\" aria-label=\"Audio waveform seek control\" aria-valuemin=\"0\" aria-valuemax=\"65.7\" aria-valuenow=\"0\"></canvas>\n"
@@ -456,7 +460,9 @@
                      "            <div class=\"waveform-overview-cursor\" data-overview-cursor></div>\n"
                      "          </div>\n"
                      "        </div>\n"
-                     "        <button class=\"follow-button\" type=\"button\" data-follow-toggle aria-pressed=\"true\">Following transcript</button>\n"
+                     "        <div class=\"follow-control-row\">\n"
+                     "          <button class=\"follow-button\" type=\"button\" data-follow-toggle aria-label=\"Pause transcript follow\" aria-pressed=\"true\"><span class=\"control-icon\" aria-hidden=\"true\"></span></button>\n"
+                     "        </div>\n"
                      "      </div>\n"
                      "    </div>\n"
                      "  </header>\n"
@@ -506,7 +512,10 @@
       (testing "player and transcript contracts remain available"
         (is (str/includes? bb-html "<audio id=\"episode-audio\" controls preload=\"metadata\" data-waveform-manifest=\"waveform.json\" src=\"../../assets/audio/fixture-episode.mp3\"></audio>"))
         (is (str/includes? bb-html "<div class=\"custom-player\" data-custom-player hidden>"))
+        (is (str/includes? bb-html "<div class=\"player-control-row\" data-player-controls>"))
+        (is (str/includes? bb-html "data-seek-backward aria-label=\"Back 15 seconds\""))
         (is (str/includes? bb-html "data-play-toggle aria-label=\"Play audio\""))
+        (is (str/includes? bb-html "data-seek-forward aria-label=\"Forward 30 seconds\""))
         (is (str/includes? bb-html "data-current-time>00:00</span>"))
         (is (str/includes? bb-html "data-duration>01:05</span>"))
         (is (str/includes? bb-html "data-waveform-canvas role=\"slider\" tabindex=\"0\" aria-label=\"Audio waveform seek control\""))
@@ -516,7 +525,8 @@
         (is (not (str/includes? bb-html "data-overview-rail tabindex=")))
         (is (not (str/includes? bb-html "data-overview-cursor role=")))
         (is (not (str/includes? bb-html "data-overview-cursor tabindex=")))
-        (is (str/includes? bb-html "data-follow-toggle aria-pressed=\"true\""))
+        (is (str/includes? bb-html "<div class=\"follow-control-row\">"))
+        (is (str/includes? bb-html "data-follow-toggle aria-label=\"Pause transcript follow\" aria-pressed=\"true\""))
         (is (str/includes? bb-html "id=\"phrase-0\" data-phrase-index=\"0\" data-start=\"0\" data-end=\"1.5\" role=\"button\" tabindex=\"0\""))
         (is (str/includes? bb-html "href=\"#phrase-0\" data-seek=\"0\""))
         (is (str/includes? bb-html "id=\"phrase-2\" data-phrase-index=\"2\" data-start=\"7.25\" data-end=\"9\" role=\"button\" tabindex=\"0\"")))

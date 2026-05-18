@@ -9,11 +9,15 @@ const html = `<!doctype html>
   <header>
     <audio id="episode-audio" controls preload="metadata" data-waveform-manifest="waveform.json"></audio>
     <div class="custom-player" data-custom-player hidden>
-      <button class="play-button" type="button" data-play-toggle aria-label="Play audio" aria-pressed="false">Play</button>
-      <div class="time-readout" aria-live="off">
-        <span data-current-time>00:00</span>
-        <span aria-hidden="true">/</span>
-        <span data-duration>01:05</span>
+      <div class="player-control-row" data-player-controls>
+        <button class="seek-button seek-button-back" type="button" data-seek-backward aria-label="Back 15 seconds"><span class="control-icon" aria-hidden="true"></span></button>
+        <button class="play-button" type="button" data-play-toggle aria-label="Play audio" aria-pressed="false"><span class="control-icon" aria-hidden="true"></span></button>
+        <button class="seek-button seek-button-forward" type="button" data-seek-forward aria-label="Forward 30 seconds"><span class="control-icon" aria-hidden="true"></span></button>
+        <div class="time-readout" aria-live="off">
+          <span data-current-time>00:00</span>
+          <span aria-hidden="true">/</span>
+          <span data-duration>01:05</span>
+        </div>
       </div>
       <div class="waveform-shell" data-waveform-container>
         <canvas class="waveform-canvas" data-waveform-canvas role="slider" tabindex="0" aria-label="Audio waveform seek control" aria-valuemin="0" aria-valuemax="65.7" aria-valuenow="0"></canvas>
@@ -22,7 +26,9 @@ const html = `<!doctype html>
           <div class="waveform-overview-cursor" data-overview-cursor></div>
         </div>
       </div>
-      <button type="button" data-follow-toggle aria-pressed="true">Following transcript</button>
+      <div class="follow-control-row">
+        <button class="follow-button" type="button" data-follow-toggle aria-label="Pause transcript follow" aria-pressed="true"><span class="control-icon" aria-hidden="true"></span></button>
+      </div>
     </div>
   </header>
   <main>
@@ -236,7 +242,10 @@ test("compiled transcript player preserves seeking, following, and active transc
   const { document } = window;
   const followButton = document.querySelector("[data-follow-toggle]");
   const customPlayer = document.querySelector("[data-custom-player]");
+  const controlRow = document.querySelector("[data-player-controls]");
+  const backButton = document.querySelector("[data-seek-backward]");
   const playButton = document.querySelector("[data-play-toggle]");
+  const forwardButton = document.querySelector("[data-seek-forward]");
   const currentTime = document.querySelector("[data-current-time]");
   const duration = document.querySelector("[data-duration]");
   const phrase0 = document.querySelector("#phrase-0");
@@ -246,17 +255,35 @@ test("compiled transcript player preserves seeking, following, and active transc
   assert.equal(customPlayer.hidden, false);
   assert.equal(audio.hidden, true);
   assert.equal(audio.hasAttribute("controls"), false);
+  assert.deepEqual(
+    Array.from(controlRow.children).map((node) => {
+      if (node.matches("[data-seek-backward]")) return "back";
+      if (node.matches("[data-play-toggle]")) return "play";
+      if (node.matches("[data-seek-forward]")) return "forward";
+      if (node.matches(".time-readout")) return "time";
+      return node.className;
+    }),
+    ["back", "play", "forward", "time"],
+  );
+  assert.equal(document.querySelector("[data-follow-toggle]").closest(".follow-control-row")?.previousElementSibling?.matches("[data-waveform-container]"), true);
+  assert.equal(backButton.getAttribute("aria-label"), "Back 15 seconds");
+  assert.equal(forwardButton.getAttribute("aria-label"), "Forward 30 seconds");
+  assert.equal(backButton.textContent.trim(), "");
+  assert.equal(forwardButton.textContent.trim(), "");
   assert.equal(followButton.getAttribute("aria-pressed"), "true");
-  assert.equal(followButton.textContent, "Following transcript");
+  assert.equal(followButton.getAttribute("aria-label"), "Pause transcript follow");
+  assert.equal(followButton.textContent.trim(), "");
   assert.equal(playButton.getAttribute("aria-pressed"), "false");
-  assert.equal(playButton.textContent, "Play");
+  assert.equal(playButton.getAttribute("aria-label"), "Play audio");
+  assert.equal(playButton.textContent.trim(), "");
   assert.equal(duration.textContent, "01:05");
 
   playButton.click();
   await Promise.resolve();
   assert.equal(audio.paused, false);
   assert.equal(playButton.getAttribute("aria-pressed"), "true");
-  assert.equal(playButton.textContent, "Pause");
+  assert.equal(playButton.getAttribute("aria-label"), "Pause audio");
+  assert.equal(playButton.textContent.trim(), "");
 
   audio.currentTime = 2.2;
   audio.dispatchEvent(new window.Event("timeupdate"));
@@ -270,19 +297,20 @@ test("compiled transcript player preserves seeking, following, and active transc
   await new Promise((resolve) => window.setTimeout(resolve, 700));
   window.dispatchEvent(new window.Event("scroll"));
   assert.equal(followButton.getAttribute("aria-pressed"), "false");
-  assert.equal(followButton.textContent, "Resume follow");
+  assert.equal(followButton.getAttribute("aria-label"), "Resume transcript follow");
+  assert.equal(followButton.textContent.trim(), "");
 
   playButton.click();
   assert.equal(audio.paused, true);
   assert.equal(playButton.getAttribute("aria-pressed"), "false");
-  assert.equal(playButton.textContent, "Play");
+  assert.equal(playButton.getAttribute("aria-label"), "Play audio");
 
   phrase0.click();
   await Promise.resolve();
   assert.equal(audio.currentTime, 0);
   assert.equal(audio.paused, false);
   assert.equal(currentTime.textContent, "00:00");
-  assert.equal(playButton.textContent, "Pause");
+  assert.equal(playButton.getAttribute("aria-label"), "Pause audio");
   assert.equal(followButton.getAttribute("aria-pressed"), "true");
   assert.equal(phrase0.classList.contains("is-active"), true);
   assert.equal(phrase1.classList.contains("is-active"), false);
@@ -301,9 +329,59 @@ test("compiled transcript player preserves seeking, following, and active transc
 
   followButton.click();
   assert.equal(followButton.getAttribute("aria-pressed"), "false");
+  assert.equal(followButton.getAttribute("aria-label"), "Resume transcript follow");
   followButton.click();
   assert.equal(followButton.getAttribute("aria-pressed"), "true");
+  assert.equal(followButton.getAttribute("aria-label"), "Pause transcript follow");
   assert.equal(scrollCalls.at(-1).id, "phrase-0");
+
+  dom.window.close();
+});
+
+test("compiled control row seek buttons clamp, resume following, and sync the transcript", async () => {
+  const { audio, dom, scrollCalls, window } = startPlayer({ audioDuration: 100 });
+  const { document } = window;
+  const backButton = document.querySelector("[data-seek-backward]");
+  const forwardButton = document.querySelector("[data-seek-forward]");
+  const followButton = document.querySelector("[data-follow-toggle]");
+  const currentTime = document.querySelector("[data-current-time]");
+  const phrase0 = document.querySelector("#phrase-0");
+  const phrase1 = document.querySelector("#phrase-1");
+
+  followButton.click();
+  assert.equal(followButton.getAttribute("aria-pressed"), "false");
+
+  audio.currentTime = 5;
+  backButton.click();
+  await Promise.resolve();
+
+  assert.equal(audio.currentTime, 0);
+  assert.equal(audio.paused, false);
+  assert.equal(currentTime.textContent, "00:00");
+  assert.equal(followButton.getAttribute("aria-pressed"), "true");
+  assert.equal(phrase0.classList.contains("is-active"), true);
+  assert.equal(scrollCalls.at(-1).id, "phrase-0");
+
+  followButton.click();
+  audio.currentTime = 80;
+  forwardButton.click();
+  await Promise.resolve();
+
+  assert.equal(audio.currentTime, 100);
+  assert.equal(currentTime.textContent, "01:40");
+  assert.equal(followButton.getAttribute("aria-pressed"), "true");
+  assert.equal(phrase1.classList.contains("is-active"), true);
+  assert.equal(scrollCalls.at(-1).id, "phrase-1");
+
+  audio.currentTime = 40;
+  backButton.click();
+  await Promise.resolve();
+  assert.equal(audio.currentTime, 25);
+
+  audio.currentTime = 40;
+  forwardButton.click();
+  await Promise.resolve();
+  assert.equal(audio.currentTime, 70);
 
   dom.window.close();
 });
@@ -707,7 +785,7 @@ test("compiled player supports waveform keyboard seek and play-pause controls", 
   }));
 
   assert.equal(audio.paused, true);
-  assert.equal(playButton.textContent, "Play");
+  assert.equal(playButton.getAttribute("aria-label"), "Play audio");
 
   canvas.dispatchEvent(new window.KeyboardEvent("keydown", {
     bubbles: true,
@@ -717,7 +795,7 @@ test("compiled player supports waveform keyboard seek and play-pause controls", 
   await Promise.resolve();
 
   assert.equal(audio.paused, false);
-  assert.equal(playButton.textContent, "Pause");
+  assert.equal(playButton.getAttribute("aria-label"), "Pause audio");
 
   dom.window.close();
 });
