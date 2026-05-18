@@ -452,6 +452,9 @@
                      "        <div class=\"waveform-shell\" data-waveform-container>\n"
                      "          <canvas class=\"waveform-canvas\" data-waveform-canvas role=\"slider\" tabindex=\"0\" aria-label=\"Audio waveform seek control\" aria-valuemin=\"0\" aria-valuemax=\"65.7\" aria-valuenow=\"0\"></canvas>\n"
                      "          <div class=\"waveform-playhead\" aria-hidden=\"true\"></div>\n"
+                     "          <div class=\"waveform-overview\" data-overview-rail aria-hidden=\"true\">\n"
+                     "            <div class=\"waveform-overview-cursor\" data-overview-cursor></div>\n"
+                     "          </div>\n"
                      "        </div>\n"
                      "        <button class=\"follow-button\" type=\"button\" data-follow-toggle aria-pressed=\"true\">Following transcript</button>\n"
                      "      </div>\n"
@@ -507,6 +510,12 @@
         (is (str/includes? bb-html "data-current-time>00:00</span>"))
         (is (str/includes? bb-html "data-duration>01:05</span>"))
         (is (str/includes? bb-html "data-waveform-canvas role=\"slider\" tabindex=\"0\" aria-label=\"Audio waveform seek control\""))
+        (is (str/includes? bb-html "<div class=\"waveform-overview\" data-overview-rail aria-hidden=\"true\">"))
+        (is (str/includes? bb-html "<div class=\"waveform-overview-cursor\" data-overview-cursor></div>"))
+        (is (not (str/includes? bb-html "data-overview-rail role=")))
+        (is (not (str/includes? bb-html "data-overview-rail tabindex=")))
+        (is (not (str/includes? bb-html "data-overview-cursor role=")))
+        (is (not (str/includes? bb-html "data-overview-cursor tabindex=")))
         (is (str/includes? bb-html "data-follow-toggle aria-pressed=\"true\""))
         (is (str/includes? bb-html "id=\"phrase-0\" data-phrase-index=\"0\" data-start=\"0\" data-end=\"1.5\" role=\"button\" tabindex=\"0\""))
         (is (str/includes? bb-html "href=\"#phrase-0\" data-seek=\"0\""))

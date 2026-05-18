@@ -46,6 +46,16 @@
       (.setAttribute play-button "aria-label" (if playing? "Pause audio" "Play audio"))
       (set! (.-textContent play-button) (if playing? "Pause" "Play")))))
 
+(defn- clamp-percent [value]
+  (-> value
+      (max 0)
+      (min 100)))
+
+(defn- overview-percent [current duration]
+  (if (and duration (pos? duration))
+    (clamp-percent (* (/ current duration) 100))
+    0))
+
 (defn- toggle-playback! [audio play-button]
   (if (.-paused audio)
     (when-let [play-result (.play audio)]
@@ -54,13 +64,19 @@
     (.pause audio))
   (update-play-button! play-button audio))
 
-(defn- update-time-display! [audio current-time duration-display waveform-canvas]
+(defn- update-overview-cursor! [overview-cursor current duration]
+  (when overview-cursor
+    (set! (.. overview-cursor -style -left)
+          (str (overview-percent current duration) "%"))))
+
+(defn- update-time-display! [audio current-time duration-display waveform-canvas overview-cursor]
   (let [current (or (number-value (.-currentTime audio)) 0)
         duration (number-value (.-duration audio))]
     (when current-time
       (set! (.-textContent current-time) (fmt-clock current)))
     (when (and duration-display duration)
       (set! (.-textContent duration-display) (fmt-clock duration)))
+    (update-overview-cursor! overview-cursor current duration)
     (when waveform-canvas
       (.setAttribute waveform-canvas "aria-valuenow" (str current))
       (when duration
@@ -344,6 +360,7 @@
         current-time (.querySelector js/document "[data-current-time]")
         duration-display (.querySelector js/document "[data-duration]")
         waveform-canvas (.querySelector js/document "[data-waveform-canvas]")
+        overview-cursor (.querySelector js/document "[data-overview-cursor]")
         follow-button (.querySelector js/document "[data-follow-toggle]")
         phrases (mapv phrase-record (query-all ".phrase"))
         suppress-scroll-pause? (atom false)
@@ -369,7 +386,12 @@
                          650)))
               (sync! ([] (sync! true))
                 ([should-scroll?]
-                 (update-time-display! audio current-time duration-display waveform-canvas)
+                 (update-time-display!
+                  audio
+                  current-time
+                  duration-display
+                  waveform-canvas
+                  overview-cursor)
                  (sync-to-audio! audio phrases scroll-active-into-view! should-scroll?)))
               (seek! [seconds]
                 (seek-to! audio phrases follow-button scroll-active-into-view! seconds)

@@ -251,6 +251,9 @@
          (if (number? duration) (str duration) "0")
          "\" aria-valuenow=\"0\"></canvas>\n"
          "          <div class=\"waveform-playhead\" aria-hidden=\"true\"></div>\n"
+         "          <div class=\"waveform-overview\" data-overview-rail aria-hidden=\"true\">\n"
+         "            <div class=\"waveform-overview-cursor\" data-overview-cursor></div>\n"
+         "          </div>\n"
          "        </div>\n"
          "        <button class=\"follow-button\" type=\"button\" data-follow-toggle aria-pressed=\"true\">Following transcript</button>\n"
          "      </div>\n"

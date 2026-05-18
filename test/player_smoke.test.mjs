@@ -18,6 +18,9 @@ const html = `<!doctype html>
       <div class="waveform-shell" data-waveform-container>
         <canvas class="waveform-canvas" data-waveform-canvas role="slider" tabindex="0" aria-label="Audio waveform seek control" aria-valuemin="0" aria-valuemax="65.7" aria-valuenow="0"></canvas>
         <div class="waveform-playhead" aria-hidden="true"></div>
+        <div class="waveform-overview" data-overview-rail aria-hidden="true">
+          <div class="waveform-overview-cursor" data-overview-cursor></div>
+        </div>
       </div>
       <button type="button" data-follow-toggle aria-pressed="true">Following transcript</button>
     </div>
@@ -70,6 +73,8 @@ function startPlayer({
   waveformPeaks,
   canvasWidth = 600,
   waveformPending = false,
+  audioDuration = 65.7,
+  durationMissing = false,
 } = {}) {
   const dom = new JSDOM(html, {
     runScripts: "outside-only",
@@ -142,13 +147,21 @@ function startPlayer({
   canvas.setPointerCapture = () => {};
   canvas.releasePointerCapture = () => {};
   let paused = true;
+  let currentTimeValue = 0;
   Object.defineProperty(audio, "paused", {
     configurable: true,
     get: () => paused,
   });
+  Object.defineProperty(audio, "currentTime", {
+    configurable: true,
+    get: () => currentTimeValue,
+    set: (value) => {
+      currentTimeValue = Number(value);
+    },
+  });
   Object.defineProperty(audio, "duration", {
     configurable: true,
-    get: () => 65.7,
+    get: () => (durationMissing ? undefined : audioDuration),
   });
   audio.play = () => {
     paused = false;
@@ -279,6 +292,108 @@ test("compiled transcript player preserves seeking, following, and active transc
   followButton.click();
   assert.equal(followButton.getAttribute("aria-pressed"), "true");
   assert.equal(scrollCalls.at(-1).id, "phrase-0");
+
+  dom.window.close();
+});
+
+test("compiled player keeps the overview rail passive and syncs its cursor to playback time", async () => {
+  const { audio, dom, window } = startPlayer({ audioDuration: 100 });
+  const { document } = window;
+  const rail = document.querySelector("[data-overview-rail]");
+  const cursor = document.querySelector("[data-overview-cursor]");
+
+  assert.ok(rail);
+  assert.ok(cursor);
+  assert.equal(rail.getAttribute("aria-hidden"), "true");
+  assert.equal(rail.getAttribute("role"), null);
+  assert.equal(rail.getAttribute("tabindex"), null);
+  assert.equal(cursor.getAttribute("role"), null);
+  assert.equal(cursor.getAttribute("tabindex"), null);
+  assert.equal(cursor.style.left, "0%");
+
+  rail.dispatchEvent(pointerEvent(window, "pointerdown", { clientX: 250 }));
+  rail.dispatchEvent(new window.KeyboardEvent("keydown", {
+    bubbles: true,
+    cancelable: true,
+    key: "ArrowRight",
+  }));
+
+  assert.equal(audio.currentTime, 0);
+  assert.equal(cursor.style.left, "0%");
+
+  audio.currentTime = 50;
+  audio.dispatchEvent(new window.Event("timeupdate"));
+  assert.equal(cursor.style.left, "50%");
+
+  audio.currentTime = 100;
+  audio.dispatchEvent(new window.Event("timeupdate"));
+  assert.equal(cursor.style.left, "100%");
+
+  audio.currentTime = -5;
+  audio.dispatchEvent(new window.Event("timeupdate"));
+  assert.equal(cursor.style.left, "0%");
+
+  audio.currentTime = 125;
+  audio.dispatchEvent(new window.Event("timeupdate"));
+  assert.equal(cursor.style.left, "100%");
+
+  dom.window.close();
+});
+
+test("compiled player clamps the overview cursor when duration is unavailable", () => {
+  for (const options of [
+    { durationMissing: true },
+    { audioDuration: Number.NaN },
+    { audioDuration: Number.POSITIVE_INFINITY },
+    { audioDuration: 0 },
+    { audioDuration: -1 },
+  ]) {
+    const { audio, dom, window } = startPlayer(options);
+    const cursor = window.document.querySelector("[data-overview-cursor]");
+
+    audio.currentTime = 50;
+    audio.dispatchEvent(new window.Event("timeupdate"));
+
+    assert.equal(cursor.style.left, "0%");
+    dom.window.close();
+  }
+});
+
+test("compiled player updates the overview cursor through transcript and waveform seeking", async () => {
+  const { audio, dom, frameCallbacks, window } = startPlayer({
+    audioDuration: 10,
+    canvasWidth: 100,
+  });
+  const { document } = window;
+  const canvas = document.querySelector("[data-waveform-canvas]");
+  const cursor = document.querySelector("[data-overview-cursor]");
+  const phrase1 = document.querySelector("#phrase-1");
+  const timestamp1 = document.querySelector("[data-seek='2']");
+
+  phrase1.click();
+  await Promise.resolve();
+  assert.equal(audio.currentTime, 2);
+  assert.equal(cursor.style.left, "20%");
+
+  timestamp1.click();
+  await Promise.resolve();
+  assert.equal(audio.currentTime, 2);
+  assert.equal(cursor.style.left, "20%");
+
+  canvas.dispatchEvent(pointerEvent(window, "pointerdown", { clientX: 200 }));
+  await Promise.resolve();
+  assert.equal(audio.currentTime, 2.5);
+  assert.equal(cursor.style.left, "25%");
+
+  canvas.dispatchEvent(new window.KeyboardEvent("keydown", {
+    bubbles: true,
+    cancelable: true,
+    key: "ArrowRight",
+  }));
+  await Promise.resolve();
+  assert.equal(audio.currentTime, 7.5);
+  assert.equal(cursor.style.left, "75%");
+  assert.equal(frameCallbacks.length, 0);
 
   dom.window.close();
 });
