@@ -51,10 +51,23 @@
       (max 0)
       (min 100)))
 
+(defn- stable-decimal [value]
+  (/ (js/Math.round (* value 1000000)) 1000000))
+
 (defn- overview-percent [current duration]
   (if (and duration (pos? duration))
-    (clamp-percent (* (/ current duration) 100))
+    (stable-decimal (clamp-percent (* (/ current duration) 100)))
     0))
+
+(defn- valid-duration [audio]
+  (let [duration (number-value (.-duration audio))]
+    (when (and duration (pos? duration))
+      duration)))
+
+(defn- clamp-time-value [seconds duration]
+  (-> seconds
+      (max 0)
+      (min duration)))
 
 (defn- toggle-playback! [audio play-button]
   (if (.-paused audio)
@@ -69,13 +82,24 @@
     (set! (.. overview-cursor -style -left)
           (str (overview-percent current duration) "%"))))
 
-(defn- update-time-display! [audio current-time duration-display waveform-canvas overview-cursor]
+(defn- update-overview-rail! [overview-rail current duration]
+  (when overview-rail
+    (.setAttribute overview-rail "aria-valuemax" (str (if duration
+                                                        (stable-decimal duration)
+                                                        0)))
+    (.setAttribute overview-rail "aria-valuenow"
+                   (str (if duration
+                          (stable-decimal (clamp-time-value current duration))
+                          0)))))
+
+(defn- update-time-display! [audio current-time duration-display waveform-canvas overview-rail overview-cursor]
   (let [current (or (number-value (.-currentTime audio)) 0)
-        duration (number-value (.-duration audio))]
+        duration (valid-duration audio)]
     (when current-time
       (set! (.-textContent current-time) (fmt-clock current)))
     (when (and duration-display duration)
       (set! (.-textContent duration-display) (fmt-clock duration)))
+    (update-overview-rail! overview-rail current duration)
     (update-overview-cursor! overview-cursor current duration)
     (when waveform-canvas
       (.setAttribute waveform-canvas "aria-valuenow" (str current))
@@ -93,9 +117,9 @@
 (def waveform-pixels-per-bucket 2)
 
 (defn- clamp-time [audio seconds]
-  (let [duration (number-value (.-duration audio))
+  (let [duration (valid-duration audio)
         lower-bound (max 0 seconds)]
-    (if (and duration (pos? duration))
+    (if duration
       (min duration lower-bound)
       lower-bound)))
 
@@ -108,6 +132,19 @@
 (defn- canvas-bucket-seconds [canvas]
   (or (number-value (dataset-value canvas "waveformBucketSeconds"))
       default-bucket-seconds))
+
+(defn- overview-event-time [audio rail event]
+  (when-let [duration (valid-duration audio)]
+    (let [rect (.getBoundingClientRect rail)
+          width (number-value (.-width rect))
+          left (or (number-value (.-left rect)) 0)]
+      (when (and width (pos? width))
+        (-> (- (or (number-value (.-clientX event)) left) left)
+            (max 0)
+            (min width)
+            (/ width)
+            (* duration)
+            (clamp-time-value duration))))))
 
 (defn- manifest-bucket-seconds [manifest]
   (or (number-value (aget manifest "bucket_seconds"))
@@ -360,6 +397,7 @@
         current-time (.querySelector js/document "[data-current-time]")
         duration-display (.querySelector js/document "[data-duration]")
         waveform-canvas (.querySelector js/document "[data-waveform-canvas]")
+        overview-rail (.querySelector js/document "[data-overview-rail]")
         overview-cursor (.querySelector js/document "[data-overview-cursor]")
         follow-button (.querySelector js/document "[data-follow-toggle]")
         phrases (mapv phrase-record (query-all ".phrase"))
@@ -375,6 +413,12 @@
       (enhance-custom-player! audio custom-player)
       (load-waveform! audio waveform-canvas)
       (mount-follow-state! follow-button)
+      (when overview-rail
+        (.removeAttribute overview-rail "aria-hidden")
+        (.setAttribute overview-rail "role" "slider")
+        (.setAttribute overview-rail "tabindex" "0")
+        (.setAttribute overview-rail "aria-label" "Episode overview seek control")
+        (.setAttribute overview-rail "aria-valuemin" "0"))
       (letfn [(scroll-active-into-view! [element]
                 (reset! suppress-scroll-pause? true)
                 (.scrollIntoView element #js {:block "center"
@@ -391,11 +435,16 @@
                   current-time
                   duration-display
                   waveform-canvas
+                  overview-rail
                   overview-cursor)
                  (sync-to-audio! audio phrases scroll-active-into-view! should-scroll?)))
               (seek! [seconds]
                 (seek-to! audio phrases follow-button scroll-active-into-view! seconds)
                 (sync! true))
+              (seek-from-overview! [event]
+                (.preventDefault event)
+                (when-let [seconds (overview-event-time audio overview-rail event)]
+                  (seek! seconds)))
               (seek-from-waveform! [event]
                 (.preventDefault event)
                 (seek! (waveform-event-time audio waveform-canvas event)))
@@ -420,7 +469,21 @@
                                 (seek! duration)))
                     (" " "Enter") (do (.preventDefault event)
                                       (toggle-playback! audio play-button))
-                    nil)))]
+                    nil)))
+              (handle-overview-key! [event]
+                (when (valid-duration audio)
+                  (let [key (.-key event)
+                        current (or (number-value (.-currentTime audio)) 0)]
+                    (case key
+                      "ArrowLeft" (do (.preventDefault event) (seek! (- current 5)))
+                      "ArrowRight" (do (.preventDefault event) (seek! (+ current 5)))
+                      "Home" (do (.preventDefault event) (seek! 0))
+                      "End" (do (.preventDefault event)
+                                (when-let [duration (valid-duration audio)]
+                                  (seek! duration)))
+                      (" " "Enter") (do (.preventDefault event)
+                                        (toggle-playback! audio play-button))
+                      nil))))]
         (.addEventListener
          transcript-root
          "click"
@@ -457,6 +520,13 @@
                (set-follow! follow-button follow?)
                (when follow?
                  (sync! true))))))
+        (when overview-rail
+          (.addEventListener
+           overview-rail
+           "pointerdown"
+           (fn [event]
+             (seek-from-overview! event)))
+          (.addEventListener overview-rail "keydown" handle-overview-key!))
         (when waveform-canvas
           (let [dragging? (atom false)
                 pending-time (atom nil)

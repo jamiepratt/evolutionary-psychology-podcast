@@ -72,6 +72,7 @@ function startPlayer({
   waveformManifest = {},
   waveformPeaks,
   canvasWidth = 600,
+  railWidth = 400,
   waveformPending = false,
   audioDuration = 65.7,
   durationMissing = false,
@@ -126,6 +127,7 @@ function startPlayer({
 
   const audio = window.document.querySelector("#episode-audio");
   const canvas = window.document.querySelector("[data-waveform-canvas]");
+  const rail = window.document.querySelector("[data-overview-rail]");
   Object.defineProperty(canvas, "clientWidth", {
     configurable: true,
     get: () => canvasWidth,
@@ -146,6 +148,16 @@ function startPlayer({
   });
   canvas.setPointerCapture = () => {};
   canvas.releasePointerCapture = () => {};
+  rail.getBoundingClientRect = () => ({
+    bottom: 88,
+    height: 16,
+    left: 50,
+    right: 50 + railWidth,
+    top: 72,
+    width: railWidth,
+    x: 50,
+    y: 72,
+  });
   let paused = true;
   let currentTimeValue = 0;
   Object.defineProperty(audio, "paused", {
@@ -296,30 +308,90 @@ test("compiled transcript player preserves seeking, following, and active transc
   dom.window.close();
 });
 
-test("compiled player keeps the overview rail passive and syncs its cursor to playback time", async () => {
+test("compiled player makes the overview rail seekable and keeps its cursor in sync", async () => {
   const { audio, dom, window } = startPlayer({ audioDuration: 100 });
   const { document } = window;
   const rail = document.querySelector("[data-overview-rail]");
   const cursor = document.querySelector("[data-overview-cursor]");
+  const currentTime = document.querySelector("[data-current-time]");
+  const followButton = document.querySelector("[data-follow-toggle]");
+  const phrase1 = document.querySelector("#phrase-1");
 
   assert.ok(rail);
   assert.ok(cursor);
-  assert.equal(rail.getAttribute("aria-hidden"), "true");
-  assert.equal(rail.getAttribute("role"), null);
-  assert.equal(rail.getAttribute("tabindex"), null);
+  assert.equal(rail.hasAttribute("aria-hidden"), false);
+  assert.equal(rail.getAttribute("role"), "slider");
+  assert.equal(rail.getAttribute("tabindex"), "0");
+  assert.equal(rail.getAttribute("aria-label"), "Episode overview seek control");
+  assert.equal(rail.getAttribute("aria-valuemin"), "0");
+  assert.equal(rail.getAttribute("aria-valuemax"), "100");
+  assert.equal(rail.getAttribute("aria-valuenow"), "0");
   assert.equal(cursor.getAttribute("role"), null);
   assert.equal(cursor.getAttribute("tabindex"), null);
   assert.equal(cursor.style.left, "0%");
 
+  followButton.click();
+  assert.equal(followButton.getAttribute("aria-pressed"), "false");
+
   rail.dispatchEvent(pointerEvent(window, "pointerdown", { clientX: 250 }));
+  await Promise.resolve();
+  assert.equal(audio.currentTime, 50);
+  assert.equal(cursor.style.left, "50%");
+  assert.equal(currentTime.textContent, "00:50");
+  assert.equal(rail.getAttribute("aria-valuenow"), "50");
+  assert.equal(followButton.getAttribute("aria-pressed"), "true");
+  assert.equal(phrase1.classList.contains("is-active"), true);
+
+  rail.dispatchEvent(pointerEvent(window, "pointerdown", { clientX: -25 }));
+  await Promise.resolve();
+  assert.equal(audio.currentTime, 0);
+  assert.equal(cursor.style.left, "0%");
+  assert.equal(rail.getAttribute("aria-valuenow"), "0");
+
+  rail.dispatchEvent(pointerEvent(window, "pointerdown", { clientX: 600 }));
+  await Promise.resolve();
+  assert.equal(audio.currentTime, 100);
+  assert.equal(cursor.style.left, "100%");
+  assert.equal(rail.getAttribute("aria-valuenow"), "100");
+
+  audio.currentTime = 50;
+  audio.dispatchEvent(new window.Event("timeupdate"));
   rail.dispatchEvent(new window.KeyboardEvent("keydown", {
     bubbles: true,
     cancelable: true,
     key: "ArrowRight",
   }));
+  await Promise.resolve();
+  assert.equal(audio.currentTime, 55);
+  assert.equal(cursor.style.left, "55%");
+  assert.equal(rail.getAttribute("aria-valuenow"), "55");
 
+  rail.dispatchEvent(new window.KeyboardEvent("keydown", {
+    bubbles: true,
+    cancelable: true,
+    key: "ArrowLeft",
+  }));
+  await Promise.resolve();
+  assert.equal(audio.currentTime, 50);
+  assert.equal(cursor.style.left, "50%");
+
+  rail.dispatchEvent(new window.KeyboardEvent("keydown", {
+    bubbles: true,
+    cancelable: true,
+    key: "Home",
+  }));
+  await Promise.resolve();
   assert.equal(audio.currentTime, 0);
   assert.equal(cursor.style.left, "0%");
+
+  rail.dispatchEvent(new window.KeyboardEvent("keydown", {
+    bubbles: true,
+    cancelable: true,
+    key: "End",
+  }));
+  await Promise.resolve();
+  assert.equal(audio.currentTime, 100);
+  assert.equal(cursor.style.left, "100%");
 
   audio.currentTime = 50;
   audio.dispatchEvent(new window.Event("timeupdate"));
@@ -340,7 +412,7 @@ test("compiled player keeps the overview rail passive and syncs its cursor to pl
   dom.window.close();
 });
 
-test("compiled player clamps the overview cursor when duration is unavailable", () => {
+test("compiled player keeps overview rail seeking safe when duration is unavailable", async () => {
   for (const options of [
     { durationMissing: true },
     { audioDuration: Number.NaN },
@@ -349,11 +421,25 @@ test("compiled player clamps the overview cursor when duration is unavailable", 
     { audioDuration: -1 },
   ]) {
     const { audio, dom, window } = startPlayer(options);
+    const rail = window.document.querySelector("[data-overview-rail]");
     const cursor = window.document.querySelector("[data-overview-cursor]");
 
     audio.currentTime = 50;
     audio.dispatchEvent(new window.Event("timeupdate"));
 
+    assert.equal(cursor.style.left, "0%");
+    assert.equal(rail.getAttribute("aria-valuemax"), "0");
+    assert.equal(rail.getAttribute("aria-valuenow"), "0");
+
+    rail.dispatchEvent(pointerEvent(window, "pointerdown", { clientX: 250 }));
+    rail.dispatchEvent(new window.KeyboardEvent("keydown", {
+      bubbles: true,
+      cancelable: true,
+      key: "End",
+    }));
+    await Promise.resolve();
+
+    assert.equal(audio.currentTime, 50);
     assert.equal(cursor.style.left, "0%");
     dom.window.close();
   }
