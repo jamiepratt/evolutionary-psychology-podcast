@@ -444,9 +444,11 @@
                      "      <audio id=\"episode-audio\" controls preload=\"metadata\" data-waveform-manifest=\"waveform.json\" src=\"../../assets/audio/fixture-episode.mp3\"></audio>\n"
                      "      <div class=\"custom-player\" data-custom-player hidden>\n"
                      "        <div class=\"player-control-row\" data-player-controls>\n"
-                     "          <button class=\"seek-button seek-button-back\" type=\"button\" data-seek-backward aria-label=\"Back 15 seconds\"><span class=\"control-icon\" aria-hidden=\"true\"></span></button>\n"
+                     "          <button class=\"seek-button seek-button-back\" type=\"button\" data-seek-offset=\"-30\" aria-label=\"Back 30 seconds\">-30s</button>\n"
+                     "          <button class=\"seek-button seek-button-back\" type=\"button\" data-seek-backward data-seek-offset=\"-15\" aria-label=\"Back 15 seconds\">-15s</button>\n"
                      "          <button class=\"play-button\" type=\"button\" data-play-toggle aria-label=\"Play audio\" aria-pressed=\"false\"><span class=\"control-icon\" aria-hidden=\"true\"></span></button>\n"
-                     "          <button class=\"seek-button seek-button-forward\" type=\"button\" data-seek-forward aria-label=\"Forward 30 seconds\"><span class=\"control-icon\" aria-hidden=\"true\"></span></button>\n"
+                     "          <button class=\"seek-button seek-button-forward\" type=\"button\" data-seek-forward data-seek-offset=\"30\" aria-label=\"Forward 30 seconds\">+30s</button>\n"
+                     "          <button class=\"seek-button seek-button-forward\" type=\"button\" data-seek-offset=\"60\" aria-label=\"Forward 1 minute\">+1m</button>\n"
                      "          <div class=\"time-readout\" aria-live=\"off\">\n"
                      "            <span data-current-time>00:00</span>\n"
                      "            <span aria-hidden=\"true\">/</span>\n"
@@ -513,9 +515,11 @@
         (is (str/includes? bb-html "<audio id=\"episode-audio\" controls preload=\"metadata\" data-waveform-manifest=\"waveform.json\" src=\"../../assets/audio/fixture-episode.mp3\"></audio>"))
         (is (str/includes? bb-html "<div class=\"custom-player\" data-custom-player hidden>"))
         (is (str/includes? bb-html "<div class=\"player-control-row\" data-player-controls>"))
-        (is (str/includes? bb-html "data-seek-backward aria-label=\"Back 15 seconds\""))
+        (is (str/includes? bb-html "data-seek-offset=\"-30\" aria-label=\"Back 30 seconds\">-30s</button>"))
+        (is (str/includes? bb-html "data-seek-backward data-seek-offset=\"-15\" aria-label=\"Back 15 seconds\">-15s</button>"))
         (is (str/includes? bb-html "data-play-toggle aria-label=\"Play audio\""))
-        (is (str/includes? bb-html "data-seek-forward aria-label=\"Forward 30 seconds\""))
+        (is (str/includes? bb-html "data-seek-forward data-seek-offset=\"30\" aria-label=\"Forward 30 seconds\">+30s</button>"))
+        (is (str/includes? bb-html "data-seek-offset=\"60\" aria-label=\"Forward 1 minute\">+1m</button>"))
         (is (str/includes? bb-html "data-current-time>00:00</span>"))
         (is (str/includes? bb-html "data-duration>01:05</span>"))
         (is (str/includes? bb-html "data-waveform-canvas role=\"slider\" tabindex=\"0\" aria-label=\"Audio waveform seek control\""))

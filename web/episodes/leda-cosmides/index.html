@@ -21,9 +21,11 @@
       <audio id="episode-audio" controls preload="metadata" data-waveform-manifest="waveform.json" src="../../assets/audio/leda-cosmides.mp3"></audio>
       <div class="custom-player" data-custom-player hidden>
         <div class="player-control-row" data-player-controls>
-          <button class="seek-button seek-button-back" type="button" data-seek-backward aria-label="Back 15 seconds"><span class="control-icon" aria-hidden="true"></span></button>
+          <button class="seek-button seek-button-back" type="button" data-seek-offset="-30" aria-label="Back 30 seconds">-30s</button>
+          <button class="seek-button seek-button-back" type="button" data-seek-backward data-seek-offset="-15" aria-label="Back 15 seconds">-15s</button>
           <button class="play-button" type="button" data-play-toggle aria-label="Play audio" aria-pressed="false"><span class="control-icon" aria-hidden="true"></span></button>
-          <button class="seek-button seek-button-forward" type="button" data-seek-forward aria-label="Forward 30 seconds"><span class="control-icon" aria-hidden="true"></span></button>
+          <button class="seek-button seek-button-forward" type="button" data-seek-forward data-seek-offset="30" aria-label="Forward 30 seconds">+30s</button>
+          <button class="seek-button seek-button-forward" type="button" data-seek-offset="60" aria-label="Forward 1 minute">+1m</button>
           <div class="time-readout" aria-live="off">
             <span data-current-time>00:00</span>
             <span aria-hidden="true">/</span>

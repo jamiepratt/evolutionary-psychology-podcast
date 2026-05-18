@@ -10,9 +10,11 @@ const html = `<!doctype html>
     <audio id="episode-audio" controls preload="metadata" data-waveform-manifest="waveform.json"></audio>
     <div class="custom-player" data-custom-player hidden>
       <div class="player-control-row" data-player-controls>
-        <button class="seek-button seek-button-back" type="button" data-seek-backward aria-label="Back 15 seconds"><span class="control-icon" aria-hidden="true"></span></button>
+        <button class="seek-button seek-button-back" type="button" data-seek-offset="-30" aria-label="Back 30 seconds">-30s</button>
+        <button class="seek-button seek-button-back" type="button" data-seek-backward data-seek-offset="-15" aria-label="Back 15 seconds">-15s</button>
         <button class="play-button" type="button" data-play-toggle aria-label="Play audio" aria-pressed="false"><span class="control-icon" aria-hidden="true"></span></button>
-        <button class="seek-button seek-button-forward" type="button" data-seek-forward aria-label="Forward 30 seconds"><span class="control-icon" aria-hidden="true"></span></button>
+        <button class="seek-button seek-button-forward" type="button" data-seek-forward data-seek-offset="30" aria-label="Forward 30 seconds">+30s</button>
+        <button class="seek-button seek-button-forward" type="button" data-seek-offset="60" aria-label="Forward 1 minute">+1m</button>
         <div class="time-readout" aria-live="off">
           <span data-current-time>00:00</span>
           <span aria-hidden="true">/</span>
@@ -243,9 +245,11 @@ test("compiled transcript player preserves seeking, following, and active transc
   const followButton = document.querySelector("[data-follow-toggle]");
   const customPlayer = document.querySelector("[data-custom-player]");
   const controlRow = document.querySelector("[data-player-controls]");
+  const back30Button = document.querySelector("[data-seek-offset='-30']");
   const backButton = document.querySelector("[data-seek-backward]");
   const playButton = document.querySelector("[data-play-toggle]");
   const forwardButton = document.querySelector("[data-seek-forward]");
+  const forward60Button = document.querySelector("[data-seek-offset='60']");
   const currentTime = document.querySelector("[data-current-time]");
   const duration = document.querySelector("[data-duration]");
   const phrase0 = document.querySelector("#phrase-0");
@@ -257,19 +261,25 @@ test("compiled transcript player preserves seeking, following, and active transc
   assert.equal(audio.hasAttribute("controls"), false);
   assert.deepEqual(
     Array.from(controlRow.children).map((node) => {
-      if (node.matches("[data-seek-backward]")) return "back";
+      if (node.matches("[data-seek-offset='-30']")) return "back-30";
+      if (node.matches("[data-seek-backward]")) return "back-15";
       if (node.matches("[data-play-toggle]")) return "play";
-      if (node.matches("[data-seek-forward]")) return "forward";
+      if (node.matches("[data-seek-forward]")) return "forward-30";
+      if (node.matches("[data-seek-offset='60']")) return "forward-60";
       if (node.matches(".time-readout")) return "time";
       return node.className;
     }),
-    ["back", "play", "forward", "time"],
+    ["back-30", "back-15", "play", "forward-30", "forward-60", "time"],
   );
   assert.equal(document.querySelector("[data-follow-toggle]").closest(".follow-control-row")?.previousElementSibling?.matches("[data-waveform-container]"), true);
+  assert.equal(back30Button.textContent, "-30s");
+  assert.equal(backButton.textContent, "-15s");
+  assert.equal(forwardButton.textContent, "+30s");
+  assert.equal(forward60Button.textContent, "+1m");
+  assert.equal(back30Button.getAttribute("aria-label"), "Back 30 seconds");
   assert.equal(backButton.getAttribute("aria-label"), "Back 15 seconds");
   assert.equal(forwardButton.getAttribute("aria-label"), "Forward 30 seconds");
-  assert.equal(backButton.textContent.trim(), "");
-  assert.equal(forwardButton.textContent.trim(), "");
+  assert.equal(forward60Button.getAttribute("aria-label"), "Forward 1 minute");
   assert.equal(followButton.getAttribute("aria-pressed"), "true");
   assert.equal(followButton.getAttribute("aria-label"), "Pause transcript follow");
   assert.equal(followButton.textContent.trim(), "");
@@ -341,8 +351,10 @@ test("compiled transcript player preserves seeking, following, and active transc
 test("compiled control row seek buttons clamp, resume following, and sync the transcript", async () => {
   const { audio, dom, scrollCalls, window } = startPlayer({ audioDuration: 100 });
   const { document } = window;
+  const back30Button = document.querySelector("[data-seek-offset='-30']");
   const backButton = document.querySelector("[data-seek-backward]");
   const forwardButton = document.querySelector("[data-seek-forward]");
+  const forward60Button = document.querySelector("[data-seek-offset='60']");
   const followButton = document.querySelector("[data-follow-toggle]");
   const currentTime = document.querySelector("[data-current-time]");
   const phrase0 = document.querySelector("#phrase-0");
@@ -379,9 +391,19 @@ test("compiled control row seek buttons clamp, resume following, and sync the tr
   assert.equal(audio.currentTime, 25);
 
   audio.currentTime = 40;
+  back30Button.click();
+  await Promise.resolve();
+  assert.equal(audio.currentTime, 10);
+
+  audio.currentTime = 40;
   forwardButton.click();
   await Promise.resolve();
   assert.equal(audio.currentTime, 70);
+
+  audio.currentTime = 40;
+  forward60Button.click();
+  await Promise.resolve();
+  assert.equal(audio.currentTime, 100);
 
   dom.window.close();
 });

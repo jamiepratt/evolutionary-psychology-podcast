@@ -208,6 +208,12 @@
 (defn- json-script-data [public-transcript]
   (str/replace (json/generate-string public-transcript) "<" "\\u003c"))
 
+(defn- render-seek-button [{:keys [class offset label aria-label legacy-attr]}]
+  (str "          <button class=\"seek-button " class "\" type=\"button\""
+       (when legacy-attr (str " " legacy-attr))
+       " data-seek-offset=\"" offset
+       "\" aria-label=\"" aria-label "\">" label "</button>\n"))
+
 (defn- render-html [{:keys [config transcript public-transcript turns names audio-href]}]
   (let [title (or (:title config)
                   (get-in transcript [:metadata :title])
@@ -241,9 +247,25 @@
          "\"></audio>\n"
          "      <div class=\"custom-player\" data-custom-player hidden>\n"
          "        <div class=\"player-control-row\" data-player-controls>\n"
-         "          <button class=\"seek-button seek-button-back\" type=\"button\" data-seek-backward aria-label=\"Back 15 seconds\"><span class=\"control-icon\" aria-hidden=\"true\"></span></button>\n"
+         (render-seek-button {:class "seek-button-back"
+                              :offset -30
+                              :label "-30s"
+                              :aria-label "Back 30 seconds"})
+         (render-seek-button {:class "seek-button-back"
+                              :offset -15
+                              :label "-15s"
+                              :aria-label "Back 15 seconds"
+                              :legacy-attr "data-seek-backward"})
          "          <button class=\"play-button\" type=\"button\" data-play-toggle aria-label=\"Play audio\" aria-pressed=\"false\"><span class=\"control-icon\" aria-hidden=\"true\"></span></button>\n"
-         "          <button class=\"seek-button seek-button-forward\" type=\"button\" data-seek-forward aria-label=\"Forward 30 seconds\"><span class=\"control-icon\" aria-hidden=\"true\"></span></button>\n"
+         (render-seek-button {:class "seek-button-forward"
+                              :offset 30
+                              :label "+30s"
+                              :aria-label "Forward 30 seconds"
+                              :legacy-attr "data-seek-forward"})
+         (render-seek-button {:class "seek-button-forward"
+                              :offset 60
+                              :label "+1m"
+                              :aria-label "Forward 1 minute"})
          "          <div class=\"time-readout\" aria-live=\"off\">\n"
          "            <span data-current-time>00:00</span>\n"
          "            <span aria-hidden=\"true\">/</span>\n"

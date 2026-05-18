@@ -402,9 +402,8 @@
   (let [audio (.querySelector js/document "#episode-audio")
         transcript-root (.querySelector js/document ".transcript-shell")
         custom-player (.querySelector js/document "[data-custom-player]")
-        back-button (.querySelector js/document "[data-seek-backward]")
+        seek-buttons (query-all "[data-seek-offset]")
         play-button (.querySelector js/document "[data-play-toggle]")
-        forward-button (.querySelector js/document "[data-seek-forward]")
         current-time (.querySelector js/document "[data-current-time]")
         duration-display (.querySelector js/document "[data-duration]")
         waveform-canvas (.querySelector js/document "[data-waveform-canvas]")
@@ -581,18 +580,14 @@
            play-button
            "click"
            (fn [_] (toggle-playback! audio play-button))))
-        (when back-button
+        (doseq [seek-button seek-buttons
+                :let [offset (number-value (dataset-value seek-button "seekOffset"))]
+                :when offset]
           (.addEventListener
-           back-button
+           seek-button
            "click"
            (fn [_]
-             (seek! (- (or (number-value (.-currentTime audio)) 0) 15) true))))
-        (when forward-button
-          (.addEventListener
-           forward-button
-           "click"
-           (fn [_]
-             (seek! (+ (or (number-value (.-currentTime audio)) 0) 30) true))))
+             (seek! (+ (or (number-value (.-currentTime audio)) 0) offset) true))))
         (.addEventListener audio "timeupdate" #(sync! true))
         (.addEventListener
          audio
