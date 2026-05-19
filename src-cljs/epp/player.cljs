@@ -92,9 +92,8 @@
                           (stable-decimal (clamp-time-value current duration))
                           0)))))
 
-(defn- update-time-display! [audio current-time duration-display waveform-canvas overview-rail overview-cursor]
-  (let [current (or (number-value (.-currentTime audio)) 0)
-        duration (valid-duration audio)]
+(defn- update-time-display-for-current! [audio current current-time duration-display waveform-canvas overview-rail overview-cursor]
+  (let [duration (valid-duration audio)]
     (when current-time
       (set! (.-textContent current-time) (fmt-clock current)))
     (when (and duration-display duration)
@@ -329,6 +328,44 @@
   (r/flush)
   (update-follow-button! follow-button))
 
+(defn- remaining-viewport-center []
+  (let [player-shell (.querySelector js/document ".player-shell")
+        shell-bottom (if player-shell
+                       (max 0 (or (number-value (.-bottom (.getBoundingClientRect player-shell))) 0))
+                       0)
+        viewport-height (or (number-value (.-innerHeight js/window)) 0)
+        remaining-height (max 1 (- viewport-height shell-bottom))]
+    (+ shell-bottom (/ remaining-height 2))))
+
+(defn- window-scroll-top []
+  (or (number-value (.-pageYOffset js/window))
+      (number-value (.-scrollY js/window))
+      0))
+
+(defn- scroll-element-midpoint-to-center! [element]
+  (let [rect (.getBoundingClientRect element)
+        phrase-midpoint (+ (or (number-value (.-top rect)) 0)
+                           (/ (or (number-value (.-height rect)) 0) 2))
+        target-top (max 0 (+ (window-scroll-top)
+                             (- phrase-midpoint (remaining-viewport-center))))]
+    (.scrollTo js/window #js {:top target-top
+                              :behavior "smooth"})))
+
+(def page-scroll-keys
+  #{"ArrowDown" "ArrowUp" "End" "Home" "PageDown" "PageUp" " "})
+
+(defn- keyboard-control-target? [target]
+  (when (and target (.-closest target))
+    (.closest target "a, button, input, select, textarea, [contenteditable=''], [contenteditable='true']")))
+
+(defn- page-scroll-key? [event]
+  (and (contains? page-scroll-keys (.-key event))
+       (not (.-defaultPrevented event))
+       (not (.-altKey event))
+       (not (.-ctrlKey event))
+       (not (.-metaKey event))
+       (not (keyboard-control-target? (.-target event)))))
+
 (defn- find-phrase-index [phrases time]
   (loop [low 0
          high (dec (count phrases))
@@ -372,8 +409,8 @@
       (when (and should-scroll? follow?)
         true))))
 
-(defn- sync-to-audio! [audio phrases scroll-active! should-scroll?]
-  (let [index (find-phrase-index phrases (.-currentTime audio))
+(defn- sync-to-time! [phrases scroll-active! should-scroll? time]
+  (let [index (find-phrase-index phrases time)
         prior (:active-index @player-state)]
     (set-active! phrases index should-scroll? (:follow? @player-state))
     (when (and should-scroll?
@@ -389,14 +426,10 @@
                (< index (count phrases)))
       (scroll-active! (:element (nth phrases index))))))
 
-(defn- seek-to! [audio phrases follow-button scroll-active! seconds]
-  (when (js/Number.isFinite seconds)
-    (set-follow! follow-button true)
-    (set! (.-currentTime audio) (clamp-time audio seconds))
-    (sync-to-audio! audio phrases scroll-active! true)
-    (when-let [play-result (.play audio)]
-      (when (.-catch play-result)
-        (.catch play-result (fn [_]))))))
+(defn- play-audio! [audio]
+  (when-let [play-result (.play audio)]
+    (when (.-catch play-result)
+      (.catch play-result (fn [_])))))
 
 (defn- install-player! []
   (let [audio (.querySelector js/document "#episode-audio")
@@ -411,8 +444,13 @@
         overview-cursor (.querySelector js/document "[data-overview-cursor]")
         follow-button (.querySelector js/document "[data-follow-toggle]")
         phrases (mapv phrase-record (query-all ".phrase"))
-        suppress-scroll-pause? (atom false)
-        scroll-pause-timer (atom 0)]
+        programmatic-scroll? (atom false)
+        programmatic-scroll-idle-timer (atom 0)
+        programmatic-scroll-failsafe-timer (atom 0)
+        user-scroll-intent? (atom false)
+        user-scroll-intent-timer (atom 0)
+        pending-seek-target (atom nil)
+        pending-seek-timer (atom 0)]
     (when (and audio
                transcript-root
                (seq phrases)
@@ -429,38 +467,95 @@
         (.setAttribute overview-rail "tabindex" "0")
         (.setAttribute overview-rail "aria-label" "Episode overview seek control")
         (.setAttribute overview-rail "aria-valuemin" "0"))
-      (letfn [(scroll-active-into-view! [element]
-                (reset! suppress-scroll-pause? true)
-                (.scrollIntoView element #js {:block "center"
-                                              :behavior "smooth"})
-                (js/window.clearTimeout @scroll-pause-timer)
-                (reset! scroll-pause-timer
-                        (js/window.setTimeout
-                         (fn [] (reset! suppress-scroll-pause? false))
-                         650)))
+      (letfn [(clear-programmatic-scroll! []
+                (reset! programmatic-scroll? false)
+                (js/window.clearTimeout @programmatic-scroll-idle-timer)
+                (js/window.clearTimeout @programmatic-scroll-failsafe-timer)
+                (reset! programmatic-scroll-idle-timer 0)
+                (reset! programmatic-scroll-failsafe-timer 0))
+              (schedule-programmatic-scroll-idle-clear! []
+                (js/window.clearTimeout @programmatic-scroll-idle-timer)
+                (reset! programmatic-scroll-idle-timer
+                        (js/window.setTimeout clear-programmatic-scroll! 160)))
+              (mark-programmatic-scroll! []
+                (reset! programmatic-scroll? true)
+                (js/window.clearTimeout @programmatic-scroll-idle-timer)
+                (js/window.clearTimeout @programmatic-scroll-failsafe-timer)
+                (reset! programmatic-scroll-idle-timer 0)
+                (reset! programmatic-scroll-failsafe-timer
+                        (js/window.setTimeout clear-programmatic-scroll! 2500)))
+              (clear-user-scroll-intent! []
+                (reset! user-scroll-intent? false)
+                (js/window.clearTimeout @user-scroll-intent-timer)
+                (reset! user-scroll-intent-timer 0))
+              (mark-user-scroll-intent! []
+                (reset! user-scroll-intent? true)
+                (js/window.clearTimeout @user-scroll-intent-timer)
+                (reset! user-scroll-intent-timer
+                        (js/window.setTimeout clear-user-scroll-intent! 250)))
+              (scroll-active-into-view! [element]
+                (mark-programmatic-scroll!)
+                (scroll-element-midpoint-to-center! element))
+              (clear-pending-seek! []
+                (reset! pending-seek-target nil)
+                (js/window.clearTimeout @pending-seek-timer)
+                (reset! pending-seek-timer 0))
+              (mark-pending-seek! [seconds]
+                (reset! pending-seek-target seconds)
+                (js/window.clearTimeout @pending-seek-timer)
+                (reset! pending-seek-timer
+                        (js/window.setTimeout clear-pending-seek! 1500)))
+              (sync-time []
+                (let [current (or (number-value (.-currentTime audio)) 0)]
+                  (if-let [target @pending-seek-target]
+                    (if (< (js/Math.abs (- current target)) 0.5)
+                      (do
+                        (clear-pending-seek!)
+                        current)
+                      target)
+                    current)))
               (sync! ([] (sync! true))
                 ([should-scroll?]
-                 (update-time-display!
-                  audio
-                  current-time
-                  duration-display
-                  waveform-canvas
-                  overview-rail
-                  overview-cursor)
-                 (sync-to-audio! audio phrases scroll-active-into-view! should-scroll?)))
-              (seek! ([seconds] (seek! seconds false))
-                ([seconds force-scroll?]
-                 (seek-to! audio phrases follow-button scroll-active-into-view! seconds)
-                 (sync! true)
-                 (when force-scroll?
-                   (scroll-active-phrase! phrases scroll-active-into-view!))))
+                 (let [current (sync-time)]
+                   (update-time-display-for-current!
+                    audio
+                    current
+                    current-time
+                    duration-display
+                    waveform-canvas
+                    overview-rail
+                    overview-cursor)
+                   (sync-to-time! phrases scroll-active-into-view! should-scroll? current))))
+              (sync-at! [seconds should-scroll?]
+                (update-time-display-for-current!
+                 audio
+                 seconds
+                 current-time
+                 duration-display
+                 waveform-canvas
+                 overview-rail
+                 overview-cursor)
+                (sync-to-time! phrases scroll-active-into-view! should-scroll? seconds))
+              (seek! ([seconds] (seek! seconds nil))
+                ([seconds {:keys [force-follow? force-scroll?]}]
+                 (when (js/Number.isFinite seconds)
+                   (let [target (clamp-time audio seconds)]
+                     (when force-follow?
+                       (set-follow! follow-button true))
+                     (mark-pending-seek! target)
+                     (set! (.-currentTime audio) target)
+                     (play-audio! audio)
+                     (sync-at! target (not force-scroll?)))
+                   (when force-scroll?
+                     (scroll-active-phrase! phrases scroll-active-into-view!)))))
               (seek-from-overview! [event]
                 (.preventDefault event)
                 (when-let [seconds (overview-event-time audio overview-rail event)]
-                  (seek! seconds)))
+                  (seek! seconds {:force-follow? true})))
               (seek-from-waveform! [event]
                 (.preventDefault event)
-                (seek! (waveform-event-time audio waveform-canvas event)))
+                (seek! (waveform-event-time audio waveform-canvas event)
+                       {:force-follow? true}))
               (schedule-waveform-seek! [pending-time raf-id seconds]
                 (reset! pending-time seconds)
                 (when (zero? @raf-id)
@@ -469,18 +564,19 @@
                            js/window
                            (fn [_]
                              (reset! raf-id 0)
-                             (seek! @pending-time))))))
+                             (seek! @pending-time {:force-follow? true}))))))
               (handle-waveform-key! [event]
                 (let [key (.-key event)
                       current (or (number-value (.-currentTime audio)) 0)]
                   (case key
-                    "ArrowLeft" (do (.preventDefault event) (seek! (- current 5)))
-                    "ArrowRight" (do (.preventDefault event) (seek! (+ current 5)))
-                    "Home" (do (.preventDefault event) (seek! 0))
+                    "ArrowLeft" (do (.preventDefault event) (seek! (- current 5) {:force-follow? true}))
+                    "ArrowRight" (do (.preventDefault event) (seek! (+ current 5) {:force-follow? true}))
+                    "Home" (do (.preventDefault event) (seek! 0 {:force-follow? true}))
                     "End" (do (.preventDefault event)
                               (when-let [duration (number-value (.-duration audio))]
-                                (seek! duration)))
+                                (seek! duration {:force-follow? true})))
                     (" " "Enter") (do (.preventDefault event)
+                                      (set-follow! follow-button true)
                                       (toggle-playback! audio play-button))
                     nil)))
               (handle-overview-key! [event]
@@ -488,13 +584,14 @@
                   (let [key (.-key event)
                         current (or (number-value (.-currentTime audio)) 0)]
                     (case key
-                      "ArrowLeft" (do (.preventDefault event) (seek! (- current 5)))
-                      "ArrowRight" (do (.preventDefault event) (seek! (+ current 5)))
-                      "Home" (do (.preventDefault event) (seek! 0))
+                      "ArrowLeft" (do (.preventDefault event) (seek! (- current 5) {:force-follow? true}))
+                      "ArrowRight" (do (.preventDefault event) (seek! (+ current 5) {:force-follow? true}))
+                      "Home" (do (.preventDefault event) (seek! 0 {:force-follow? true}))
                       "End" (do (.preventDefault event)
                                 (when-let [duration (valid-duration audio)]
-                                  (seek! duration)))
+                                  (seek! duration {:force-follow? true})))
                       (" " "Enter") (do (.preventDefault event)
+                                        (set-follow! follow-button true)
                                         (toggle-playback! audio play-button))
                       nil))))]
         (.addEventListener
@@ -504,10 +601,12 @@
            (let [target (.-target event)
                  phrase (when target (.closest target ".phrase"))]
              (if phrase
-               (seek! (number-value (dataset-value phrase "start")))
+               (seek! (number-value (dataset-value phrase "start"))
+                      {:force-scroll? true})
                (when-let [timestamp (when target (.closest target "[data-seek]"))]
                  (.preventDefault event)
-                 (seek! (number-value (dataset-value timestamp "seek"))))))))
+                 (seek! (number-value (dataset-value timestamp "seek"))
+                        {:force-scroll? true}))))))
         (.addEventListener
          transcript-root
          "keydown"
@@ -515,15 +614,31 @@
            (when (and (#{"Enter" " "} (.-key event)))
              (when-let [phrase (some-> event .-target (.closest ".phrase"))]
                (.preventDefault event)
-               (seek! (number-value (dataset-value phrase "start")))))))
+               (seek! (number-value (dataset-value phrase "start"))
+                      {:force-scroll? true})))))
         (.addEventListener
          js/window
          "scroll"
          (fn [_]
-           (when (and (not @suppress-scroll-pause?)
-                      (not (.-paused audio)))
-             (set-follow! follow-button false)))
+           (cond
+             @user-scroll-intent?
+             (do
+               (clear-user-scroll-intent!)
+               (clear-programmatic-scroll!)
+               (when-not (.-paused audio)
+                 (set-follow! follow-button false)))
+
+             @programmatic-scroll?
+             (schedule-programmatic-scroll-idle-clear!)))
          #js {:passive true})
+        (.addEventListener js/window "wheel" mark-user-scroll-intent! #js {:passive true})
+        (.addEventListener js/window "touchmove" mark-user-scroll-intent! #js {:passive true})
+        (.addEventListener
+         js/window
+         "keydown"
+         (fn [event]
+           (when (page-scroll-key? event)
+             (mark-user-scroll-intent!))))
         (when follow-button
           (.addEventListener
            follow-button
@@ -532,7 +647,8 @@
              (let [follow? (not (:follow? @player-state))]
                (set-follow! follow-button follow?)
                (when follow?
-                 (sync! true))))))
+                 (sync! false)
+                 (scroll-active-phrase! phrases scroll-active-into-view!))))))
         (when overview-rail
           (.addEventListener
            overview-rail
@@ -579,7 +695,9 @@
           (.addEventListener
            play-button
            "click"
-           (fn [_] (toggle-playback! audio play-button))))
+           (fn [_]
+             (set-follow! follow-button true)
+             (toggle-playback! audio play-button))))
         (doseq [seek-button seek-buttons
                 :let [offset (number-value (dataset-value seek-button "seekOffset"))]
                 :when offset]
@@ -587,13 +705,14 @@
            seek-button
            "click"
            (fn [_]
-             (seek! (+ (or (number-value (.-currentTime audio)) 0) offset) true))))
+             (seek! (+ (or (number-value (.-currentTime audio)) 0) offset)
+                    {:force-follow? true
+                     :force-scroll? true}))))
         (.addEventListener audio "timeupdate" #(sync! true))
         (.addEventListener
          audio
          "play"
          (fn [_]
-           (set-follow! follow-button true)
            (update-play-button! play-button audio)
            (sync! true)))
         (.addEventListener
@@ -606,7 +725,6 @@
          audio
          "seeked"
          (fn [_]
-           (set-follow! follow-button true)
            (sync! true)))
         (.addEventListener audio "loadedmetadata" #(sync! false))
         (update-play-button! play-button audio)
